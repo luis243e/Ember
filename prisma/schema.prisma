@@ -1,0 +1,181 @@
+// =============================================================================
+//  schema.prisma: el "plano" de tu base de datos.
+//  Aquí describes tus tablas (models), sus columnas y cómo se relacionan.
+//  Prisma lee este archivo para:
+//    1) crear/modificar las tablas reales en Postgres (migraciones), y
+//    2) generar un cliente TypeScript con autocompletado para usarlas.
+//  Los comentarios con "//" son ignorados por Prisma; son solo para ti.
+// =============================================================================
+
+
+// -----------------------------------------------------------------------------
+//  GENERATOR: qué código genera Prisma a partir de este archivo.
+// -----------------------------------------------------------------------------
+generator client {
+  // "prisma-client-js" genera el cliente clásico de JavaScript/TypeScript.
+  // En tu código lo importarás así: import { PrismaClient } from "@prisma/client"
+  provider = "prisma-client-js"
+}
+
+
+// -----------------------------------------------------------------------------
+//  DATASOURCE: a qué base de datos se conecta Prisma.
+// -----------------------------------------------------------------------------
+datasource db {
+  // Tipo de base de datos: PostgreSQL (la que usa Supabase).
+  provider  = "postgresql"
+
+  // URL principal (pooler, puerto 6543). env("...") significa:
+  // "lee este valor del archivo .env", así la contraseña no queda en el código.
+  url       = env("DATABASE_URL")
+
+  // URL directa (puerto 5432). Prisma la usa SOLO para migraciones,
+  // porque el pooler no soporta bien los cambios de estructura de tablas.
+  directUrl = env("DIRECT_URL")
+}
+
+
+// -----------------------------------------------------------------------------
+//  ENUMS: listas cerradas de valores permitidos.
+//  Si una columna es de tipo enum, la base de datos rechaza cualquier otro valor.
+// -----------------------------------------------------------------------------
+
+// Dificultad de una tarea (jefe).
+enum Difficulty {
+  EASY    // fácil
+  MEDIUM  // media
+  HARD    // difícil
+}
+
+// Estado del combate contra una tarea (jefe).
+enum TaskStatus {
+  ALIVE     // la tarea sigue pendiente: el jefe sigue en pie
+  DEFEATED  // la completaste a tiempo: derrotaste al jefe
+  FAILED    // pasó la fecha de entrega sin terminarla: el jefe te derrotó
+}
+
+
+// -----------------------------------------------------------------------------
+//  MODELOS: cada "model" se convierte en una TABLA de Postgres.
+//  Cada línea dentro es una COLUMNA con la forma:  nombre  Tipo  @atributos
+// -----------------------------------------------------------------------------
+
+// ========== USUARIO (y su personaje) ==========
+model User {
+  // Identificador único de la fila.
+  //   String     → se guarda como texto.
+  //   @id        → esta columna es la clave primaria (identifica cada fila).
+  //   @default(cuid()) → si no das un id, Prisma genera uno aleatorio único
+  //                      (algo como "clx9k2...").
+  id           String   @id @default(cuid())
+
+  // @unique → la base de datos impide que dos usuarios tengan el mismo email.
+  email        String   @unique
+
+  // Nombre visible del usuario.
+  name         String
+
+  // NUNCA se guarda la contraseña real, solo su "hash": una versión cifrada
+  // de un solo sentido (por ejemplo con bcrypt) que no se puede revertir.
+  passwordHash String
+
+  // Fecha de creación. @default(now()) pone la fecha/hora actual al crear la fila.
+  createdAt    DateTime @default(now())
+
+  // --- Campos del personaje ---
+  // Nivel del personaje. Int = número entero. Todos empiezan en nivel 1.
+  level        Int      @default(1)
+
+  // "Almas": la experiencia acumulada. Empieza en 0.
+  souls        Int      @default(0)
+
+  // "Llama": la racha de días seguidos estudiando. Empieza en 0.
+  flame        Int      @default(0)
+
+  // --- Relación ---
+  // Un usuario tiene MUCHAS materias. "Subject[]" (con corchetes) = lista.
+  // OJO: esta línea NO crea una columna en la tabla; es un "atajo" para que
+  // Prisma te deje pedir "el usuario con sus materias" en una sola consulta.
+  subjects     Subject[]
+}
+
+
+// ========== MATERIA ==========
+model Subject {
+  id     String @id @default(cuid())
+
+  // Nombre de la materia, por ejemplo "Cálculo".
+  name   String
+
+  // CLAVE FORÁNEA: guarda el id del usuario dueño de esta materia.
+  // Esta SÍ es una columna real en la tabla.
+  userId String
+
+  // Relación con User. Se lee así:
+  //   "user" es de tipo User;
+  //   fields: [userId]   → la columna de ESTA tabla que apunta al usuario...
+  //   references: [id]   → ...apunta a la columna "id" de la tabla User.
+  //   onDelete: Cascade  → si se borra el usuario, se borran sus materias.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Una materia tiene MUCHAS tareas (lado "lista" de la relación).
+  tasks  Task[]
+
+  // @@index (doble @ = afecta a toda la tabla) crea un índice sobre userId.
+  // Un índice es como el índice de un libro: hace muy rápido buscar
+  // "todas las materias del usuario X". Postgres no lo crea solo.
+  @@index([userId])
+}
+
+
+// ========== TAREA (JEFE) ==========
+model Task {
+  id          String     @id @default(cuid())
+
+  // Nombre de la tarea/jefe, por ejemplo "Parcial de Física".
+  name        String
+
+  // Clave foránea hacia la materia a la que pertenece.
+  subjectId   String
+  subject     Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  // Fecha de entrega. DateTime guarda fecha y hora.
+  dueDate     DateTime
+
+  // Dificultad: solo acepta EASY, MEDIUM o HARD (el enum de arriba).
+  difficulty  Difficulty
+
+  // Vida total del jefe (por ejemplo, minutos de estudio estimados).
+  maxHp       Int
+
+  // Vida que le queda. Irá bajando con cada sesión de estudio.
+  currentHp   Int
+
+  // Estado del combate. Toda tarea nueva empieza como ALIVE.
+  status      TaskStatus @default(ALIVE)
+
+  // Una tarea tiene MUCHAS sesiones de estudio.
+  sessions    StudySession[]
+
+  // Índice para buscar rápido las tareas de una materia.
+  @@index([subjectId])
+}
+
+
+// ========== SESIÓN DE ESTUDIO ==========
+model StudySession {
+  id              String   @id @default(cuid())
+
+  // Clave foránea hacia la tarea en la que se estudió.
+  taskId          String
+  task            Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  // Momento en que empezó la sesión. Por defecto, "ahora".
+  startedAt       DateTime @default(now())
+
+  // Duración de la sesión en minutos.
+  durationMinutes Int
+
+  // Índice para buscar rápido las sesiones de una tarea.
+  @@index([taskId])
+}
