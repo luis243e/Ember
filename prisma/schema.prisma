@@ -75,14 +75,29 @@ model User {
   // Nombre visible del usuario.
   name         String
 
-  // NUNCA se guarda la contraseña real, solo su "hash": una versión cifrada
-  // de un solo sentido (por ejemplo con bcrypt) que no se puede revertir.
-  passwordHash String
+  // ¿Confirmó su correo? Better Auth lo pone en true cuando el usuario
+  // abre el enlace de verificación. Por ahora la verificación está
+  // desactivada, así que se queda en false.
+  emailVerified Boolean @default(false)
+
+  // URL de la foto de perfil. El "?" significa OPCIONAL (puede ser null).
+  // La rellenará Google cuando añadamos ese inicio de sesión.
+  image        String?
+
+  // OJO: aquí ya NO hay contraseña. Better Auth guarda el hash de la
+  // contraseña en la tabla Account (columna "password"), porque una persona
+  // puede tener varias formas de entrar (correo, Google...).
 
   // Fecha de creación. @default(now()) pone la fecha/hora actual al crear la fila.
   createdAt    DateTime @default(now())
 
+  // Fecha de la última modificación. @updatedAt hace que Prisma la
+  // actualice sola cada vez que cambia la fila.
+  updatedAt    DateTime @updatedAt
+
   // --- Campos del personaje ---
+  // Better Auth los conoce como "additionalFields" (ver lib/auth.ts), con
+  // input: false para que nadie pueda fijarlos desde el navegador.
   // Nivel del personaje. Int = número entero. Todos empiezan en nivel 1.
   level        Int      @default(1)
 
@@ -97,6 +112,101 @@ model User {
   // OJO: esta línea NO crea una columna en la tabla; es un "atajo" para que
   // Prisma te deje pedir "el usuario con sus materias" en una sola consulta.
   subjects     Subject[]
+
+  // Sesiones abiertas y formas de entrar del usuario (tablas de Better Auth).
+  sessions     Session[]
+  accounts     Account[]
+}
+
+
+// =============================================================================
+//  TABLAS DE BETTER AUTH
+//  Better Auth lee y escribe estas tablas por su cuenta. Sus nombres de campo
+//  deben coincidir con los que espera la librería; no los renombres.
+//  Fíjate en que su "id" no tiene @default: Better Auth genera el id él mismo.
+// =============================================================================
+
+// ========== SESIÓN ==========
+// Una fila por cada sesión iniciada (cada navegador/dispositivo con la
+// sesión abierta). Al cerrar sesión, la fila se borra.
+model Session {
+  id        String   @id
+
+  // Texto aleatorio que se guarda (firmado) en la cookie del navegador.
+  // En cada petición, Better Auth busca la sesión por este token.
+  token     String   @unique
+
+  // Cuándo caduca la sesión (por defecto, 7 días; se renueva al usarla).
+  expiresAt DateTime
+
+  // Datos informativos del dispositivo. Opcionales.
+  ipAddress String?
+  userAgent String?
+
+  // Dueño de la sesión. Si se borra el usuario, se borran sus sesiones.
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+
+// ========== CUENTA (forma de entrar) ==========
+// Una fila por cada método de acceso de un usuario.
+//   - Correo y contraseña → providerId = "credential", y "password" guarda
+//     el hash (scrypt) de la contraseña.
+//   - Google (más adelante) → providerId = "google", con sus tokens.
+model Account {
+  id                    String    @id
+
+  // Id del usuario DENTRO del proveedor. Para "credential" es el mismo
+  // id del User; para Google será el id de Google.
+  accountId             String
+
+  // Quién autentica: "credential", "google", etc.
+  providerId            String
+
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Tokens que entregan proveedores como Google. Vacíos con correo/contraseña.
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+
+  // Hash de la contraseña (solo en cuentas "credential"). Nunca la real.
+  password              String?
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+
+// ========== VERIFICACIÓN ==========
+// Códigos temporales de un solo uso: confirmar correo, restablecer
+// contraseña... Se borran al usarse o al caducar.
+model Verification {
+  id         String   @id
+
+  // A qué o a quién pertenece el código (por ejemplo, un correo).
+  identifier String
+
+  // El código o token en sí.
+  value      String
+
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
 }
 
 
