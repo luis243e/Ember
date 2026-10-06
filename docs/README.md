@@ -19,8 +19,10 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   (`/registro`, `/login`), página protegida `/mazmorra` y cierre de sesión.
   En producción se probaron el registro, el login y la redirección de
   `/mazmorra` sin sesión a `/login` (6 oct).
-- **Todavía no existe:** nada del juego en sí (materias, tareas, sesiones de
-  estudio). La página `/` es la plantilla de Create Next App.
+- **Fase 1 en curso:** `/materias` (protegida) permite crear materias y ver
+  la lista propia, ordenada por nombre (6 oct, probado solo en local).
+- **Todavía no existe:** tareas (jefes) ni sesiones de estudio. La página `/`
+  es la plantilla de Create Next App.
 
 ## Cómo arrancar en un equipo nuevo
 
@@ -62,8 +64,16 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   Supabase no puede leerla. Prisma entra como `postgres`, que se salta RLS.
 - **Una sola instancia de `PrismaClient`**, la de `lib/prisma.ts`. Más
   instancias agotan las conexiones.
-- **Las páginas privadas se protegen con `auth.api.getSession` en la propia
-  página.** Mirar solo si existe la cookie no es seguro.
+- **Las páginas privadas y las Server Actions empiezan con `await
+  requireUser()`** (`lib/session.ts`), que comprueba la sesión con
+  `auth.api.getSession` y, si no hay, redirige a `/login`. Mirar solo si
+  existe la cookie no es seguro.
+- **El `userId` sale siempre de la sesión, nunca del formulario, y toda
+  consulta filtra por él.** Una Server Action acepta cualquier POST, así que
+  lo que llega en el formulario no es de fiar.
+- **No usar `mode: "insensitive"` de Prisma para comparar nombres.** Se
+  traduce a `ILIKE`, donde `_` y `%` son comodines. Se compara en el servidor
+  con `toLocaleLowerCase("es")`.
 - **Código en inglés, comentarios en español.**
 - **Los secretos nunca van a Git** (`.env*` está en `.gitignore`), ni a
   `docs/`. Producción usa su propio `BETTER_AUTH_SECRET`.
@@ -82,6 +92,13 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] **Activar la verificación de correo.** Urgente: la app ya es pública y
   cualquiera puede registrarse con un correo ajeno. Pasos en
   [2026-10-05-auth-better-auth.md](sesiones/2026-10-05-auth-better-auth.md).
+- [ ] **Índice único sobre `(userId, lower(name))` en `Subject`** para
+  cerrar la carrera del duplicado: dos envíos casi simultáneos pueden crear
+  la misma materia dos veces. Hará falta una migración con SQL a mano.
+  Detalles en
+  [2026-10-06-materias.md](sesiones/2026-10-06-materias.md#pendientes).
+- [ ] Probar `/materias` en producción.
+- [ ] Que el formulario de materias conserve lo escrito cuando hay error.
 - [ ] Inicio de sesión con Google.
 - [ ] Traducir los errores de Better Auth, que llegan en inglés, usando el
   campo `code` del error.
@@ -91,6 +108,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Materias: crear y listar~~ (6 oct).
 - [x] ~~Registro e inicio de sesión~~ (5 oct).
 - [x] ~~Desplegar en producción~~ (6 oct).
 - [x] ~~Aclarar si producción y desarrollo comparten la base~~: sí, es la
@@ -106,3 +124,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-04 | Base de datos con Prisma y Supabase (importada de Obsidian) | [2026-10-04-base-de-datos-prisma.md](sesiones/2026-10-04-base-de-datos-prisma.md) |
 | 2026-10-05 | Registro y login con Better Auth (importada de Obsidian) | [2026-10-05-auth-better-auth.md](sesiones/2026-10-05-auth-better-auth.md) |
 | 2026-10-06 | RLS, `postinstall` y despliegue en Vercel | [2026-10-06-despliegue-vercel.md](sesiones/2026-10-06-despliegue-vercel.md) |
+| 2026-10-06 | Fase 1: materias (crear y listar) y `requireUser()` | [2026-10-06-materias.md](sesiones/2026-10-06-materias.md) |

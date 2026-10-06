@@ -1,19 +1,18 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import Link from "next/link";
+import { requireUser } from "@/lib/session";
 import { cerrarSesion } from "./actions";
 
 export default async function MazmorraPage() {
-  // Lee la cookie de la petición y busca la sesión en la base de datos.
-  const session = await auth.api.getSession({ headers: await headers() });
-
-  // Sin sesión válida, fuera.
-  if (!session) redirect("/login");
+  // Sin sesión válida, requireUser() redirige a /login.
+  const user = await requireUser();
 
   return (
     <main>
       <h1>La mazmorra</h1>
-      <p>Bienvenido, {session.user.name}.</p>
+      <p>Bienvenido, {user.name}.</p>
+      <p>
+        <Link href="/materias">Mis materias</Link>
+      </p>
       <form action={cerrarSesion}>
         <button type="submit">Cerrar sesión</button>
       </form>
