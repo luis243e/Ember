@@ -20,9 +20,15 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   En producción se probaron el registro, el login y la redirección de
   `/mazmorra` sin sesión a `/login` (6 oct).
 - **Fase 1 en curso:** `/materias` (protegida) permite crear materias y ver
-  la lista propia, ordenada por nombre (6 oct, probado solo en local).
-- **Todavía no existe:** tareas (jefes) ni sesiones de estudio. La página `/`
-  es la plantilla de Create Next App.
+  la lista propia, ordenada por nombre. `/mazmorra/invocar` crea jefes
+  (nombre, materia, fecha de entrega y dificultad) y `/mazmorra` lista los
+  jefes vivos ordenados por fecha, con la vida en texto (`400 / 400`). Todo
+  del 6 oct y probado solo en local.
+- **Reglas del juego** en `lib/game.ts`: cada bloque de estudio quita 100 de
+  vida. EASY = 2 bloques (200), MEDIUM = 4 (400) y HARD = 6 (600).
+- **Todavía no existe:** batalla (sesiones de estudio), editar o borrar jefes,
+  barra de vida dibujada ni paso automático de jefes vencidos a `FAILED`. La
+  página `/` es la plantilla de Create Next App.
 
 ## Cómo arrancar en un equipo nuevo
 
@@ -74,6 +80,19 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **No usar `mode: "insensitive"` de Prisma para comparar nombres.** Se
   traduce a `ILIKE`, donde `_` y `%` son comodines. Se compara en el servidor
   con `toLocaleLowerCase("es")`.
+- **`Task` no tiene `userId`: los jefes se filtran siempre a través de la
+  materia** (`subject: { userId: user.id }`), y al crear uno se comprueba en
+  el servidor que la materia sea del usuario.
+- **Las reglas del juego solo viven en `lib/game.ts`.** La vida se calcula en
+  el servidor a partir de la dificultad, nunca se lee del formulario.
+- **Las fechas de entrega son días de calendario.** Se guardan a las 00:00
+  UTC, se muestran con `timeZone: "UTC"` (`formatDueDate`) y "hoy" se calcula
+  en `America/Bogota` (`todayInAppTimeZone`), todo en `lib/dates.ts`. Así el
+  desfase con Vercel, que corre en UTC, no cambia el día.
+- **Los nombres se normalizan con `normalizeName()`** (`lib/text.ts`) antes
+  de validarlos. Materias admite 60 caracteres y jefes 80.
+- **Para conservar un `<select>` tras un error, ponle `key` con su valor.**
+  React solo aplica el `defaultValue` de un select al montarlo.
 - **Código en inglés, comentarios en español.**
 - **Los secretos nunca van a Git** (`.env*` está en `.gitignore`), ni a
   `docs/`. Producción usa su propio `BETTER_AUTH_SECRET`.
@@ -97,8 +116,13 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   la misma materia dos veces. Hará falta una migración con SQL a mano.
   Detalles en
   [2026-10-06-materias.md](sesiones/2026-10-06-materias.md#pendientes).
-- [ ] Probar `/materias` en producción.
-- [ ] Que el formulario de materias conserve lo escrito cuando hay error.
+- [ ] **Jefes vencidos:** un jefe `ALIVE` cuya fecha ya pasó sigue saliendo
+  como vivo. Falta decidir cuándo pasa a `FAILED`.
+- [ ] Probar `/materias` y `/mazmorra/invocar` en producción.
+- [ ] Que el formulario de materias conserve lo escrito cuando hay error (el
+  de jefes ya lo hace).
+- [ ] Zona horaria por usuario, si llega a haber usuarios fuera de Colombia
+  (hoy es la constante `APP_TIME_ZONE`).
 - [ ] Inicio de sesión con Google.
 - [ ] Traducir los errores de Better Auth, que llegan en inglés, usando el
   campo `code` del error.
@@ -108,6 +132,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Jefes: invocar y listar en la mazmorra~~ (6 oct).
 - [x] ~~Materias: crear y listar~~ (6 oct).
 - [x] ~~Registro e inicio de sesión~~ (5 oct).
 - [x] ~~Desplegar en producción~~ (6 oct).
@@ -125,3 +150,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-05 | Registro y login con Better Auth (importada de Obsidian) | [2026-10-05-auth-better-auth.md](sesiones/2026-10-05-auth-better-auth.md) |
 | 2026-10-06 | RLS, `postinstall` y despliegue en Vercel | [2026-10-06-despliegue-vercel.md](sesiones/2026-10-06-despliegue-vercel.md) |
 | 2026-10-06 | Fase 1: materias (crear y listar) y `requireUser()` | [2026-10-06-materias.md](sesiones/2026-10-06-materias.md) |
+| 2026-10-06 | Fase 1: invocar jefes y listarlos en la mazmorra | [2026-10-06-invocar-jefes.md](sesiones/2026-10-06-invocar-jefes.md) |

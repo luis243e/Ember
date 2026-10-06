@@ -255,7 +255,8 @@ model Task {
   // Dificultad: solo acepta EASY, MEDIUM o HARD (el enum de arriba).
   difficulty  Difficulty
 
-  // Vida total del jefe (por ejemplo, minutos de estudio estimados).
+  // Vida total del jefe: 100 por cada bloque de estudio que hace falta para
+  // derrotarlo (EASY 200, MEDIUM 400, HARD 600). Las reglas están en lib/game.ts.
   maxHp       Int
 
   // Vida que le queda. Irá bajando con cada sesión de estudio.

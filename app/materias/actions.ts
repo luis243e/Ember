@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { normalizeName } from "@/lib/text";
 import type { EstadoFormulario } from "@/app/registro/actions";
 
 const MAX_LONGITUD_NOMBRE = 60;
@@ -14,11 +15,8 @@ export async function crearMateria(
   // El dueño sale SIEMPRE de la sesión, nunca del formulario.
   const user = await requireUser();
 
-  // Quita los espacios de los extremos y junta los repetidos de dentro:
-  // "  Cálculo   II " → "Cálculo II".
-  const name = String(formData.get("name") ?? "")
-    .trim()
-    .replace(/\s+/g, " ");
+  // "  Cálculo   II " → "Cálculo II" (ver lib/text.ts).
+  const name = normalizeName(String(formData.get("name") ?? ""));
 
   // Se valida después de normalizar.
   if (name === "") return { error: "Escribe un nombre para la materia." };
