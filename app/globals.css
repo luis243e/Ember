@@ -1,26 +1,86 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Paleta de Ember, sacada del Figma "LANDING FINAL". Cada token genera sus
+   clases: --color-gold da bg-gold, text-gold, border-gold, etc. */
+@theme {
+  --color-night: #0a0d14;
+  --color-night-alt: #0f121a;
+  --color-surface: #171a24;
+  --color-line: #38332b;
+  --color-gold: #b89654;
+  --color-gold-bright: #d9b266;
+  --color-parchment: #e0ded4;
+  --color-ash: #b2b0ad;
+  --color-smoke: #8c8c99;
+  --color-blood: #9e2929;
+  --color-hp-empty: #262429;
+  --color-ember: #e58c40;
+  --color-ember-deep: #1f1412;
 }
 
+/* next/font define estas variables en <html> (app/layout.tsx). Con "inline"
+   la clase usa la variable tal cual en vez de copiar su valor aquí. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-cinzel);
+  --font-logo: var(--font-cinzel-decorative);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  /* La app es solo oscura: así el navegador pinta oscuros también los
+     controles nativos (calendario del input de fecha, lista del select). */
+  html {
+    color-scheme: dark;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Desplazamiento suave a las anclas, salvo si el usuario pidió menos
+     movimiento en su sistema. */
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+
+  /* Legibilidad mínima para las pantallas que aún no tienen diseño (login,
+     registro, materias, mazmorra). Solo afecta a elementos sin clases. Gana
+     al reset de Tailwind por especificidad (:not([class]) suma un atributo),
+     y cualquier clase lo pisa porque las utilidades van en una capa
+     posterior. */
+  main:not([class]) {
+    padding: 1.5rem 1rem;
+  }
+
+  h1:not([class]) {
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+
+  h2:not([class]) {
+    margin-top: 1rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+
+  a:not([class]) {
+    color: var(--color-gold-bright);
+    text-decoration: underline;
+  }
+
+  input:not([class], [type="radio"], [type="checkbox"]),
+  select:not([class]),
+  button:not([class]) {
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background-color: var(--color-surface);
+    padding: 0.25rem 0.625rem;
+  }
+
+  button:not([class]) {
+    cursor: pointer;
+  }
+
+  button:not([class]):disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
 }

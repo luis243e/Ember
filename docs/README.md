@@ -27,8 +27,12 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Reglas del juego** en `lib/game.ts`: cada bloque de estudio quita 100 de
   vida. EASY = 2 bloques (200), MEDIUM = 4 (400) y HARD = 6 (600).
 - **Todavía no existe:** batalla (sesiones de estudio), editar o borrar jefes,
-  barra de vida dibujada ni paso automático de jefes vencidos a `FAILED`. La
-  página `/` es la plantilla de Create Next App.
+  barra de vida dibujada ni paso automático de jefes vencidos a `FAILED`.
+- **Diseño (6 oct, solo en local):** `/` es la landing pública del Figma
+  ("LANDING FINAL"), estática y adaptable a móvil. Hay base visual
+  reutilizable: tokens de color en `app/globals.css`, fuentes Inter, Cinzel y
+  Cinzel Decorative con `next/font`, y componentes en `components/ui/`. El
+  resto de pantallas solo tiene estilos mínimos de legibilidad.
 
 ## Cómo arrancar en un equipo nuevo
 
@@ -93,7 +97,21 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de validarlos. Materias admite 60 caracteres y jefes 80.
 - **Para conservar un `<select>` tras un error, ponle `key` con su valor.**
   React solo aplica el `defaultValue` de un select al montarlo.
-- **Código en inglés, comentarios en español.**
+- **Código en inglés, comentarios en español.** Los componentes genéricos de
+  `components/ui/` también van en inglés (`Card`, `ButtonLink`); los de
+  dominio pueden ir en español (`NuevaMateriaForm`).
+- **Colores y fuentes solo con tokens.** Los colores van en `@theme` de
+  `app/globals.css` (`bg-night`, `text-gold`...) y las fuentes con
+  `font-display` (títulos) y `font-logo` (logo). Nada de hexadecimales sueltos
+  en las páginas, para que un cambio de paleta sea un solo sitio.
+- **lucide-react fijado exacto en 1.52.0,** como better-auth. Se queda aunque
+  añade ~4,6 KB de JS de cliente (decisión de Luis).
+- **Probar el diseño también en anchos intermedios** (320, 360, 768, 1024,
+  1112, 1280), no solo en los del Figma (1440 y 375). Ahí apareció el desbordamiento de
+  las mecánicas.
+- **Los estilos base de `globals.css` solo tocan elementos sin clases**
+  (`:not([class])`). Así las pantallas sin diseño se leen y las diseñadas no
+  heredan nada inesperado.
 - **Los secretos nunca van a Git** (`.env*` está en `.gitignore`), ni a
   `docs/`. Producción usa su propio `BETTER_AUTH_SECRET`.
 - **Después de cambiar una variable en Vercel, hacer Redeploy.** El despliegue
@@ -126,12 +144,20 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Inicio de sesión con Google.
 - [ ] Traducir los errores de Better Auth, que llegan en inglés, usando el
   campo `code` del error.
-- [ ] Sustituir la página `/` de Create Next App.
+- [ ] **Mirar `/materias`, `/mazmorra` y `/mazmorra/invocar` con sesión** para
+  confirmar que se leen con la base visual nueva (solo se probó una réplica).
+- [ ] 8 vulnerabilidades altas de `npm audit` (vía `eslint-config-next` y
+  `prisma`), anteriores a esta sesión. No usar `audit fix --force`: cambia
+  Prisma.
+- [ ] Rediseñar las demás pantallas con la base nueva.
 - [ ] Comprobar a qué entornos de Vercel (*Production* / *Preview*) están
   asignadas las variables.
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Sustituir la página `/` de Create Next App~~ (6 oct).
+- [x] ~~Barra de la landing a menos de 375 px: "Crear cuenta" invadía el
+  margen~~ (6 oct).
 - [x] ~~Jefes: invocar y listar en la mazmorra~~ (6 oct).
 - [x] ~~Materias: crear y listar~~ (6 oct).
 - [x] ~~Registro e inicio de sesión~~ (5 oct).
@@ -151,3 +177,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-06 | RLS, `postinstall` y despliegue en Vercel | [2026-10-06-despliegue-vercel.md](sesiones/2026-10-06-despliegue-vercel.md) |
 | 2026-10-06 | Fase 1: materias (crear y listar) y `requireUser()` | [2026-10-06-materias.md](sesiones/2026-10-06-materias.md) |
 | 2026-10-06 | Fase 1: invocar jefes y listarlos en la mazmorra | [2026-10-06-invocar-jefes.md](sesiones/2026-10-06-invocar-jefes.md) |
+| 2026-10-06 | Base visual (tokens, fuentes, componentes) y landing pública | [2026-10-06-landing-y-base-visual.md](sesiones/2026-10-06-landing-y-base-visual.md) |
