@@ -3,8 +3,9 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/cn";
 
 type ButtonVariant = "primary" | "ghost";
-// sm = 44 px (barra de navegación), lg = 56 px (hero y llamada final).
-type ButtonSize = "sm" | "lg";
+// sm = 44 px (barra de navegación), md = 48 px (junto a un campo, que también
+// mide 48), lg = 56 px (hero, llamada final y envío de formularios).
+type ButtonSize = "sm" | "md" | "lg";
 
 type ButtonStyleOptions = {
   variant?: ButtonVariant;
@@ -12,7 +13,7 @@ type ButtonStyleOptions = {
 };
 
 const BASE =
-  "inline-flex items-center justify-center rounded-md text-[15px] leading-none font-bold tracking-[1.5px] whitespace-nowrap uppercase transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex items-center justify-center gap-2 rounded-md text-[15px] leading-none font-bold tracking-[1.5px] whitespace-nowrap uppercase transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright disabled:cursor-not-allowed disabled:opacity-60";
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-gold text-night hover:bg-gold-bright",
@@ -21,6 +22,7 @@ const VARIANTS: Record<ButtonVariant, string> = {
 
 const SIZES: Record<ButtonSize, string> = {
   sm: "h-11 px-[22px]",
+  md: "h-12 px-[22px]",
   lg: "h-14 px-8",
 };
 

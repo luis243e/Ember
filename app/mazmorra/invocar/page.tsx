@@ -1,8 +1,18 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import { BookOpen } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { todayInAppTimeZone } from "@/lib/dates";
+import { AppShell } from "@/components/app/app-shell";
+import { ButtonLink } from "@/components/ui/button";
+import { cardStyles } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { cn } from "@/lib/cn";
 import { InvocarJefeForm } from "./invocar-jefe-form";
+
+export const metadata: Metadata = {
+  title: "Invocar jefe · Ember",
+};
 
 export default async function InvocarPage() {
   const user = await requireUser();
@@ -15,19 +25,38 @@ export default async function InvocarPage() {
   });
 
   return (
-    <main>
-      <h1>Invocar jefe</h1>
+    // "Mi mazmorra" queda marcada: invocar es parte de la mazmorra.
+    <AppShell
+      active="mazmorra"
+      userName={user.name}
+      title="Invocar nuevo jefe"
+      description="Convierte una entrega en un enemigo."
+    >
       {subjects.length === 0 ? (
-        <p>
-          Para invocar un jefe necesitas al menos una materia.{" "}
-          <Link href="/materias">Crea tu primera materia</Link>.
-        </p>
+        <EmptyState
+          icon={<BookOpen size={40} />}
+          title="Aún no tienes materias"
+          action={
+            // Por debajo de 375 px el texto no cabe en la tarjeta y el botón
+            // no se parte en dos líneas: se reduce la letra, como "Crear
+            // cuenta" en la landing. Las clases con variante van después en
+            // el CSS y pisan las del tamaño sm.
+            <ButtonLink
+              href="/materias"
+              size="sm"
+              className="max-[374px]:px-3 max-[374px]:text-[13px] max-[374px]:tracking-[1px]"
+            >
+              Crear mi primera materia
+            </ButtonLink>
+          }
+        >
+          Para invocar un jefe necesitas al menos una materia.
+        </EmptyState>
       ) : (
-        <InvocarJefeForm subjects={subjects} today={todayInAppTimeZone()} />
+        <div className={cn(cardStyles, "max-w-[640px] p-5 md:p-8")}>
+          <InvocarJefeForm subjects={subjects} today={todayInAppTimeZone()} />
+        </div>
       )}
-      <p>
-        <Link href="/mazmorra">Volver a la mazmorra</Link>
-      </p>
-    </main>
+    </AppShell>
   );
 }

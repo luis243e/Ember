@@ -22,12 +22,13 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Fase 1 en curso:** `/materias` (protegida) permite crear materias y ver
   la lista propia, ordenada por nombre. `/mazmorra/invocar` crea jefes
   (nombre, materia, fecha de entrega y dificultad) y `/mazmorra` lista los
-  jefes vivos ordenados por fecha, con la vida en texto (`400 / 400`). Todo
-  del 6 oct y probado solo en local.
+  jefes vivos ordenados por fecha, con la vida en texto (`400 / 400`) y en
+  una barra por bloques. Lo funcional es del 6 oct; aún no se ha probado en
+  producción.
 - **Reglas del juego** en `lib/game.ts`: cada bloque de estudio quita 100 de
   vida. EASY = 2 bloques (200), MEDIUM = 4 (400) y HARD = 6 (600).
 - **Todavía no existe:** batalla (sesiones de estudio), editar o borrar jefes,
-  barra de vida dibujada ni paso automático de jefes vencidos a `FAILED`.
+  ni paso automático de jefes vencidos a `FAILED`.
 - **Diseño (en producción desde la noche del 6 oct):** `/` es la landing
   pública del Figma ("LANDING FINAL"), estática y adaptable a móvil. Hay base
   visual reutilizable: tokens de color en `app/globals.css`, fuentes Inter,
@@ -37,13 +38,21 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   en bucle, sin sonido, con botón Pausar/Reproducir en el pie
   (`components/landing/hero-video.tsx`, el único componente de cliente de la
   landing). Con `prefers-reduced-motion` solo se ve el poster.
-- **Login y registro con diseño (7 oct, solo en local):** `/login` y
+- **Login y registro con diseño (7 oct, en `origin/main` desde el commit
+  `9937693`, que Vercel despliega solo):** `/login` y
   `/registro` siguen los marcos "LOGIN FINAL" y "REGISTRO FINAL" del Figma.
   Comparten `components/auth/auth-layout.tsx`; las páginas son estáticas y
   solo el formulario es componente de cliente. Piezas nuevas reutilizables:
   `TextField` (con `inputStyles`) y `Alert`. Los errores de Better Auth salen
-  en español (`lib/auth-errors.ts`). `/materias` y `/mazmorra` aún tienen
-  solo estilos mínimos de legibilidad.
+  en español (`lib/auth-errors.ts`).
+- **Mazmorra, invocar y materias con diseño (7 oct, solo en local, sin
+  commit):** siguen los marcos "MAZMORRA FINAL", "INVOCAR FINAL" y "MATERIAS
+  FINAL" (y sus versiones vacía y móvil). Comparten el armazón
+  `components/app/app-shell.tsx` (barra lateral desde 768 px; barra superior
+  con pestañas en móvil). Piezas nuevas en `components/ui/`: `HpBar` (barra de
+  vida por bloques), `SpriteSlot` (hueco del sprite), `EmptyState`, el botón
+  de 48 px (`size: "md"`) y `selectStyles`. El formulario de materias ya
+  conserva lo escrito si hay error.
 
 ## Cómo arrancar en un equipo nuevo
 
@@ -126,6 +135,22 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   en las páginas, para que un cambio de paleta sea un solo sitio.
 - **lucide-react fijado exacto en 1.52.0,** como better-auth. Se queda aunque
   añade ~4,6 KB de JS de cliente (decisión de Luis).
+- **Las páginas privadas usan `AppShell`, no un `layout.tsx`.** Un layout no
+  se vuelve a pintar al navegar (no sabría qué enlace marcar sin JavaScript
+  de cliente) y su `requireUser()` no protegería nada. `AppShell` solo pinta:
+  cada página sigue llamando antes a `requireUser()`.
+- **Dentro del contenido de las páginas privadas, los puntos de corte van con
+  consultas de contenedor** (`@container` en el padre y `@sm:`,
+  `@min-[34rem]:`... en los hijos). Las variantes `sm:`/`md:` miran la
+  ventana, y desde 768 px la barra lateral quita 240 px: a 768 hay menos
+  sitio que a 640. `lg:` y `xl:` de ventana sí valen, porque ahí la barra
+  está siempre.
+- **Un control con aspecto propio sigue siendo el control real.** Las
+  dificultades son `<input type="radio">` invisibles estirados sobre la
+  tarjeta, con `aria-label` completo; así teclado, `required` y lector de
+  pantalla funcionan sin JavaScript.
+- **Los botones no parten el texto (`whitespace-nowrap`):** con un texto
+  largo dentro de una tarjeta, mirar la captura de 320 px.
 - **Probar el diseño también en anchos intermedios** (320, 360, 768, 1024,
   1112, 1280), no solo en los del Figma (1440 y 375). Ahí apareció el desbordamiento de
   las mecánicas.
@@ -163,8 +188,6 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] **Jefes vencidos:** un jefe `ALIVE` cuya fecha ya pasó sigue saliendo
   como vivo. Falta decidir cuándo pasa a `FAILED`.
 - [ ] Probar `/materias` y `/mazmorra/invocar` en producción.
-- [ ] Que el formulario de materias conserve lo escrito cuando hay error (el
-  de jefes ya lo hace).
 - [ ] Zona horaria por usuario, si llega a haber usuarios fuera de Colombia
   (hoy es la constante `APP_TIME_ZONE`).
 - [ ] **Validar el nombre del registro en el servidor** con `normalizeName()`:
@@ -177,8 +200,16 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] 8 vulnerabilidades altas de `npm audit` (vía `eslint-config-next` y
   `prisma`), anteriores a esta sesión. No usar `audit fix --force`: cambia
   Prisma.
-- [ ] Rediseñar `/materias`, `/mazmorra` y `/mazmorra/invocar` con la base
-  nueva (reutilizando `TextField`, `inputStyles` y `Alert`).
+- [ ] **Al construir la batalla, añadir "Atacar" a las tarjetas de jefe**
+  (`app/mazmorra/boss-card.tsx`) y reutilizar allí `HpBar`.
+- [ ] Probar en producción `/mazmorra`, `/mazmorra/invocar` y `/materias`
+  rediseñadas, con un lector de pantalla y en Safari y Firefox.
+- [ ] Quitar de `app/globals.css` las reglas de legibilidad mínima
+  (`:not([class])`), que ya no usa ninguna página (comprobar antes
+  `not-found` y las páginas de error).
+- [ ] El botón del calendario del campo de fecha muestra el foco con el
+  recuadro blanco de Edge, no con el contorno dorado (CSS no puede
+  estilizarlo).
 - [ ] **Video del hero:** probarlo en un iPhone con modo de bajo consumo
   (el botón debe decir "Reproducir" y arrancarlo), en Safari y Firefox, y
   con un lector de pantalla. Detalles en
@@ -188,6 +219,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Rediseñar `/materias`, `/mazmorra` y `/mazmorra/invocar`~~ (7 oct).
+- [x] ~~Que el formulario de materias conserve lo escrito cuando hay error~~
+  (7 oct).
 - [x] ~~Traducir los errores de Better Auth usando el campo `code`~~ (7 oct,
   `lib/auth-errors.ts`).
 - [x] ~~Rediseñar `/login` y `/registro`~~ (7 oct).
@@ -222,3 +256,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-06 | Base visual (tokens, fuentes, componentes) y landing pública | [2026-10-06-landing-y-base-visual.md](sesiones/2026-10-06-landing-y-base-visual.md) |
 | 2026-10-06 | Video de demostración en el hero (pausa y movimiento reducido) | [2026-10-06-video-hero-landing.md](sesiones/2026-10-06-video-hero-landing.md) |
 | 2026-10-07 | Diseño de `/login` y `/registro`, errores en español y arreglo del 500 | [2026-10-07-diseno-login-registro.md](sesiones/2026-10-07-diseno-login-registro.md) |
+| 2026-10-07 | Diseño de `/mazmorra`, `/mazmorra/invocar` y `/materias` (`AppShell`, barra de vida, consultas de contenedor) | [2026-10-07-diseno-mazmorra-materias.md](sesiones/2026-10-07-diseno-mazmorra-materias.md) |
