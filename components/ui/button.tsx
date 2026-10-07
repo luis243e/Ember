@@ -12,7 +12,7 @@ type ButtonStyleOptions = {
 };
 
 const BASE =
-  "inline-flex items-center justify-center rounded-md text-[15px] leading-none font-bold tracking-[1.5px] whitespace-nowrap uppercase transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright";
+  "inline-flex items-center justify-center rounded-md text-[15px] leading-none font-bold tracking-[1.5px] whitespace-nowrap uppercase transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright disabled:cursor-not-allowed disabled:opacity-60";
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-gold text-night hover:bg-gold-bright",

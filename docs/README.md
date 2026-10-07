@@ -28,15 +28,22 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   vida. EASY = 2 bloques (200), MEDIUM = 4 (400) y HARD = 6 (600).
 - **Todavía no existe:** batalla (sesiones de estudio), editar o borrar jefes,
   barra de vida dibujada ni paso automático de jefes vencidos a `FAILED`.
-- **Diseño (6 oct, solo en local):** `/` es la landing pública del Figma
-  ("LANDING FINAL"), estática y adaptable a móvil. Hay base visual
-  reutilizable: tokens de color en `app/globals.css`, fuentes Inter, Cinzel y
-  Cinzel Decorative con `next/font`, y componentes en `components/ui/`. El
-  resto de pantallas solo tiene estilos mínimos de legibilidad.
-- **Video del hero (6 oct, solo en local):** demo de 10 s en bucle, sin
-  sonido, con botón Pausar/Reproducir en el pie
+- **Diseño (en producción desde la noche del 6 oct):** `/` es la landing
+  pública del Figma ("LANDING FINAL"), estática y adaptable a móvil. Hay base
+  visual reutilizable: tokens de color en `app/globals.css`, fuentes Inter,
+  Cinzel y Cinzel Decorative con `next/font`, y componentes en
+  `components/ui/`.
+- **Video del hero (en producción desde la noche del 6 oct):** demo de 10 s
+  en bucle, sin sonido, con botón Pausar/Reproducir en el pie
   (`components/landing/hero-video.tsx`, el único componente de cliente de la
   landing). Con `prefers-reduced-motion` solo se ve el poster.
+- **Login y registro con diseño (7 oct, solo en local):** `/login` y
+  `/registro` siguen los marcos "LOGIN FINAL" y "REGISTRO FINAL" del Figma.
+  Comparten `components/auth/auth-layout.tsx`; las páginas son estáticas y
+  solo el formulario es componente de cliente. Piezas nuevas reutilizables:
+  `TextField` (con `inputStyles`) y `Alert`. Los errores de Better Auth salen
+  en español (`lib/auth-errors.ts`). `/materias` y `/mazmorra` aún tienen
+  solo estilos mínimos de legibilidad.
 
 ## Cómo arrancar en un equipo nuevo
 
@@ -104,6 +111,15 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Código en inglés, comentarios en español.** Los componentes genéricos de
   `components/ui/` también van en inglés (`Card`, `ButtonLink`); los de
   dominio pueden ir en español (`NuevaMateriaForm`).
+- **Los errores de Better Auth se reconocen con `isAPIError(error)`**
+  (de `better-auth/api`), nunca con `error instanceof APIError`. Los errores
+  de validación del cuerpo los lanza `better-call` con su propia clase, que
+  `instanceof` no reconoce: acababan en un 500. Lo que no pase `isAPIError`
+  se relanza. Los mensajes se traducen por `code` en `lib/auth-errors.ts`.
+- **`cn` no resuelve conflictos de clases:** solo las junta. El `className`
+  de un componente sirve para añadir clases, no para cambiar una que ya pone
+  (gana la que Tailwind escribe después en su CSS, no la última). Para
+  cambiarla, una prop del componente o clases propias.
 - **Colores y fuentes solo con tokens.** Los colores van en `@theme` de
   `app/globals.css` (`bg-night`, `text-gold`...) y las fuentes con
   `font-display` (títulos) y `font-logo` (logo). Nada de hexadecimales sueltos
@@ -151,15 +167,18 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de jefes ya lo hace).
 - [ ] Zona horaria por usuario, si llega a haber usuarios fuera de Colombia
   (hoy es la constante `APP_TIME_ZONE`).
+- [ ] **Validar el nombre del registro en el servidor** con `normalizeName()`:
+  hoy se acepta vacío o solo con espacios (Better Auth admite `""`).
+- [ ] **"Ya existe una cuenta con ese correo." permite averiguar si un correo
+  está registrado.** Revisarlo cuando se active la verificación de correo.
+- [ ] Probar en producción `/login` y `/registro` rediseñados, y con un
+  lector de pantalla.
 - [ ] Inicio de sesión con Google.
-- [ ] Traducir los errores de Better Auth, que llegan en inglés, usando el
-  campo `code` del error.
-- [ ] **Mirar `/materias`, `/mazmorra` y `/mazmorra/invocar` con sesión** para
-  confirmar que se leen con la base visual nueva (solo se probó una réplica).
 - [ ] 8 vulnerabilidades altas de `npm audit` (vía `eslint-config-next` y
   `prisma`), anteriores a esta sesión. No usar `audit fix --force`: cambia
   Prisma.
-- [ ] Rediseñar las demás pantallas con la base nueva.
+- [ ] Rediseñar `/materias`, `/mazmorra` y `/mazmorra/invocar` con la base
+  nueva (reutilizando `TextField`, `inputStyles` y `Alert`).
 - [ ] **Video del hero:** probarlo en un iPhone con modo de bajo consumo
   (el botón debe decir "Reproducir" y arrancarlo), en Safari y Firefox, y
   con un lector de pantalla. Detalles en
@@ -169,6 +188,13 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Traducir los errores de Better Auth usando el campo `code`~~ (7 oct,
+  `lib/auth-errors.ts`).
+- [x] ~~Rediseñar `/login` y `/registro`~~ (7 oct).
+- [x] ~~Registrarse con un correo sin dominio completo (`luis@gmail`) daba un
+  error 500~~, también en producción (7 oct).
+- [x] ~~Mirar `/materias`, `/mazmorra` y `/mazmorra/invocar` con sesión~~:
+  se leen bien a 375 y 1440 (capturas del 7 oct).
 - [x] ~~Sustituir el marcador de la captura de batalla del hero~~ por el
   video de demostración (6 oct).
 - [x] ~~Sustituir la página `/` de Create Next App~~ (6 oct).
@@ -195,3 +221,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-06 | Fase 1: invocar jefes y listarlos en la mazmorra | [2026-10-06-invocar-jefes.md](sesiones/2026-10-06-invocar-jefes.md) |
 | 2026-10-06 | Base visual (tokens, fuentes, componentes) y landing pública | [2026-10-06-landing-y-base-visual.md](sesiones/2026-10-06-landing-y-base-visual.md) |
 | 2026-10-06 | Video de demostración en el hero (pausa y movimiento reducido) | [2026-10-06-video-hero-landing.md](sesiones/2026-10-06-video-hero-landing.md) |
+| 2026-10-07 | Diseño de `/login` y `/registro`, errores en español y arreglo del 500 | [2026-10-07-diseno-login-registro.md](sesiones/2026-10-07-diseno-login-registro.md) |

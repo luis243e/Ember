@@ -2,14 +2,15 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { APIError } from "better-auth/api";
+import { isAPIError } from "better-auth/api";
 import { auth } from "@/lib/auth";
-import type { EstadoFormulario } from "@/app/registro/actions";
+import { authErrorMessage } from "@/lib/auth-errors";
+import type { EstadoAcceso } from "@/app/registro/actions";
 
 export async function iniciarSesion(
-  _estadoAnterior: EstadoFormulario,
+  _estadoAnterior: EstadoAcceso,
   formData: FormData,
-): Promise<EstadoFormulario> {
+): Promise<EstadoAcceso> {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
 
@@ -21,7 +22,12 @@ export async function iniciarSesion(
       headers: await headers(),
     });
   } catch (error) {
-    if (error instanceof APIError) return { error: error.message };
+    // isAPIError reconoce el APIError de better-auth y el de better-call (ver
+    // app/registro/actions.ts). Lo demás es un fallo de verdad y se relanza.
+    if (isAPIError(error)) {
+      // El login no tiene nombre: name va vacío.
+      return { error: authErrorMessage(error), valores: { name: "", email } };
+    }
     throw error;
   }
 
