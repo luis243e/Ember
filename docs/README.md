@@ -33,6 +33,10 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   reutilizable: tokens de color en `app/globals.css`, fuentes Inter, Cinzel y
   Cinzel Decorative con `next/font`, y componentes en `components/ui/`. El
   resto de pantallas solo tiene estilos mínimos de legibilidad.
+- **Video del hero (6 oct, solo en local):** demo de 10 s en bucle, sin
+  sonido, con botón Pausar/Reproducir en el pie
+  (`components/landing/hero-video.tsx`, el único componente de cliente de la
+  landing). Con `prefers-reduced-motion` solo se ve el poster.
 
 ## Cómo arrancar en un equipo nuevo
 
@@ -109,6 +113,12 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Probar el diseño también en anchos intermedios** (320, 360, 768, 1024,
   1112, 1280), no solo en los del Figma (1440 y 375). Ahí apareció el desbordamiento de
   las mecánicas.
+- **La landing es estática; lo interactivo va en componentes de cliente
+  pequeños y aislados** (como `HeroVideo`), para no mandar al navegador más
+  JavaScript del necesario.
+- **Lo que se mueve solo lleva forma de pausarlo y respeta
+  `prefers-reduced-motion`** (WCAG 2.2.2). Si basta con CSS o HTML (como
+  `<source media>`), sin JavaScript.
 - **Los estilos base de `globals.css` solo tocan elementos sin clases**
   (`:not([class])`). Así las pantallas sin diseño se leen y las diseñadas no
   heredan nada inesperado.
@@ -150,11 +160,17 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `prisma`), anteriores a esta sesión. No usar `audit fix --force`: cambia
   Prisma.
 - [ ] Rediseñar las demás pantallas con la base nueva.
+- [ ] **Video del hero:** probarlo en un iPhone con modo de bajo consumo
+  (el botón debe decir "Reproducir" y arrancarlo), en Safari y Firefox, y
+  con un lector de pantalla. Detalles en
+  [2026-10-06-video-hero-landing.md](sesiones/2026-10-06-video-hero-landing.md#pendientes).
 - [ ] Comprobar a qué entornos de Vercel (*Production* / *Preview*) están
   asignadas las variables.
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Sustituir el marcador de la captura de batalla del hero~~ por el
+  video de demostración (6 oct).
 - [x] ~~Sustituir la página `/` de Create Next App~~ (6 oct).
 - [x] ~~Barra de la landing a menos de 375 px: "Crear cuenta" invadía el
   margen~~ (6 oct).
@@ -178,3 +194,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-06 | Fase 1: materias (crear y listar) y `requireUser()` | [2026-10-06-materias.md](sesiones/2026-10-06-materias.md) |
 | 2026-10-06 | Fase 1: invocar jefes y listarlos en la mazmorra | [2026-10-06-invocar-jefes.md](sesiones/2026-10-06-invocar-jefes.md) |
 | 2026-10-06 | Base visual (tokens, fuentes, componentes) y landing pública | [2026-10-06-landing-y-base-visual.md](sesiones/2026-10-06-landing-y-base-visual.md) |
+| 2026-10-06 | Video de demostración en el hero (pausa y movimiento reducido) | [2026-10-06-video-hero-landing.md](sesiones/2026-10-06-video-hero-landing.md) |

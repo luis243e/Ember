@@ -9,6 +9,7 @@ import {
   Swords,
   type LucideIcon,
 } from "lucide-react";
+import { HeroVideo } from "@/components/landing/hero-video";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, cardStyles } from "@/components/ui/card";
@@ -225,11 +226,7 @@ function Hero() {
       <p className="text-[13px] leading-[normal] text-smoke">
         Gratis · Funciona con cualquier materia
       </p>
-      {/* Hueco para la captura de la batalla: aún no existe esa pantalla. */}
-      <div className="flex aspect-[900/420] w-full max-w-[900px] flex-col items-center justify-center gap-1.5 rounded-xl border border-line bg-surface px-4 text-smoke">
-        <p className="text-sm">[ captura de la pantalla de batalla ]</p>
-        <p className="text-xs">un jefe, su barra de vida y el temporizador</p>
-      </div>
+      <HeroVideo />
     </section>
   );
 }
