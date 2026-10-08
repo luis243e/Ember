@@ -1,6 +1,7 @@
 import Image from "next/image";
+import { Flame } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { levelForSouls } from "@/lib/game";
+import { levelForSouls, type FlameState } from "@/lib/game";
 import { formatNumber } from "@/lib/text";
 
 // Lo que hace falta del usuario de la sesión (requireUser() ya lo trae).
@@ -12,14 +13,18 @@ export type CharacterUser = {
 
 type CharacterCardProps = {
   user: CharacterUser;
+  // Estado de la llama, ya calculado con flameState() (lo hace AppShell una
+  // sola vez para los dos bloques, el de escritorio y el de móvil).
+  flame: FlameState;
   className?: string;
 };
 
-// Bloque del personaje (Figma "ALMAS Y NIVELES"): avatar, nombre, nivel y
-// barra de almas hacia el siguiente nivel. Componente de servidor: no manda
-// JavaScript al navegador. El nivel se deduce de las almas con
-// levelForSouls(), igual que en el servidor al golpear.
-export function CharacterCard({ user, className }: CharacterCardProps) {
+// Bloque del personaje (Figma "ALMAS Y NIVELES" y "LA LLAMA Y LA REDENCIÓN"):
+// avatar, nombre con la llama a la derecha, nivel y barra de almas hacia el
+// siguiente nivel. Componente de servidor: no manda JavaScript al navegador.
+// El nivel se deduce de las almas con levelForSouls(), igual que en el
+// servidor al golpear.
+export function CharacterCard({ user, flame, className }: CharacterCardProps) {
   const { level, soulsIntoLevel, nextLevelCost } = levelForSouls(user.souls);
   const atMaxLevel = nextLevelCost === null;
   const percent = atMaxLevel ? 100 : (soulsIntoLevel / nextLevelCost) * 100;
@@ -53,11 +58,16 @@ export function CharacterCard({ user, className }: CharacterCardProps) {
             <span aria-hidden>{initialOf(user.name)}</span>
           )}
         </div>
-        {/* min-w-0: sin esto, truncate no puede cortar dentro de un flex. */}
-        <div className="flex min-w-0 flex-col gap-[3px] leading-[normal]">
-          <p title={user.name} className="truncate text-[15px] font-semibold text-parchment">
-            {user.name}
-          </p>
+        {/* min-w-0: sin esto, truncate no puede cortar dentro de un flex.
+            flex-1: la columna llega hasta el borde y la llama queda a la
+            derecha. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-[3px] leading-[normal]">
+          <div className="flex items-center justify-between gap-2">
+            <p title={user.name} className="truncate text-[15px] font-semibold text-parchment">
+              {user.name}
+            </p>
+            <FlameBadge flame={flame} />
+          </div>
           <p className="font-display text-xs font-bold tracking-[1.5px] text-gold uppercase">
             Nivel {level}
           </p>
@@ -89,6 +99,40 @@ export function CharacterCard({ user, className }: CharacterCardProps) {
         </p>
       </div>
     </div>
+  );
+}
+
+// Colores de cada estado: icono y número. En peligro, la llama sigue siendo
+// de ascua pero tenue (el 45 % del Figma) y el número pasa a gris claro.
+const FLAME_COLORS: Record<FlameState["status"], { icon: string; number: string }> = {
+  lit: { icon: "text-ember", number: "text-ember" },
+  "at-risk": { icon: "text-ember/45", number: "text-ash" },
+  out: { icon: "text-smoke", number: "text-smoke" },
+};
+
+const FLAME_STATUS_TEXT: Record<FlameState["status"], string> = {
+  lit: "Encendida.",
+  "at-risk": "En peligro: golpea hoy para mantener la llama.",
+  out: "Apagada.",
+};
+
+// La llama junto al nombre: icono y días seguidos. role="img" con aria-label
+// hace que el lector de pantalla lea una frase entera ("Racha: 5 días.
+// Encendida.") en vez del número suelto. En peligro lleva además title, que
+// el ratón muestra al pasar por encima.
+function FlameBadge({ flame }: { flame: FlameState }) {
+  const colors = FLAME_COLORS[flame.status];
+  const daysText = flame.days === 1 ? "1 día" : `${formatNumber(flame.days)} días`;
+  return (
+    <p
+      role="img"
+      aria-label={`Racha: ${daysText}. ${FLAME_STATUS_TEXT[flame.status]}`}
+      title={flame.status === "at-risk" ? "Golpea hoy para mantener la llama" : undefined}
+      className="flex shrink-0 items-center gap-1 text-[13px] leading-[normal] font-semibold"
+    >
+      <Flame aria-hidden size={16} className={colors.icon} />
+      <span className={colors.number}>{formatNumber(flame.days)}</span>
+    </p>
   );
 }
 

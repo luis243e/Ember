@@ -5,7 +5,9 @@ import { refresh } from "next/cache";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { todayInAppTimeZone } from "@/lib/dates";
 import {
+  flameAfterStrike,
   HP_PER_BLOCK,
   levelForSouls,
   rollStrikeSouls,
@@ -56,6 +58,20 @@ async function bloquearTarea(tx: Prisma.TransactionClient, taskId: string) {
   >`
     SELECT "status", "currentHp", "difficulty" FROM "Task"
     WHERE "id" = ${taskId} FOR UPDATE`;
+  return rows[0];
+}
+
+// Lo mismo con la fila del usuario: la bloquea hasta el final de la
+// transacción y devuelve lo que hace falta para calcular almas, nivel y
+// llama. Va SIEMPRE la última (tarea → vigilia → usuario). Con la fila
+// bloqueada nadie más puede cambiar esos valores, así que se calculan en el
+// código y se escriben de una vez.
+async function bloquearUsuario(tx: Prisma.TransactionClient, userId: string) {
+  const rows = await tx.$queryRaw<
+    { souls: number; level: number; flame: number; lastStrikeDay: Date | null }[]
+  >`
+    SELECT "souls", "level", "flame", "lastStrikeDay" FROM "User"
+    WHERE "id" = ${userId} FOR UPDATE`;
   return rows[0];
 }
 
@@ -179,23 +195,28 @@ export async function asestarGolpe(taskId: string): Promise<ResultadoBatalla> {
       data: defeated ? { currentHp, status: "DEFEATED", victorySouls } : { currentHp },
     });
 
-    // 4. Por último el usuario. increment suma en la propia base (SET souls =
-    // souls + n); el UPDATE bloquea su fila hasta el final. El nivel se
-    // deduce del total nuevo y se escribe aquí, en la misma transacción, solo
-    // si cambia: es el ÚNICO sitio que escribe User.level.
+    // 4. Por último el usuario: se bloquea su fila, se calcula todo en el
+    // código y se escribe UNA vez. Almas: el total nuevo. Nivel: se deduce
+    // del total y se escribe solo si cambia (es el ÚNICO sitio que escribe
+    // User.level). Llama: con el día de hoy en hora de Colombia, el mismo
+    // "hoy" que las fechas de entrega.
+    const owner = await bloquearUsuario(tx, user.id);
     const gained = strikeSouls + (victorySouls ?? 0);
-    const updated = await tx.user.update({
+    const souls = owner.souls + gained;
+    const level = levelForSouls(souls).level;
+    const flame = flameAfterStrike(owner.flame, owner.lastStrikeDay, todayInAppTimeZone(now));
+    await tx.user.update({
       where: { id: user.id },
-      data: { souls: { increment: gained } },
-      select: { souls: true, level: true },
+      data: {
+        souls,
+        ...(level !== owner.level && { level }),
+        flame: flame.flame,
+        lastStrikeDay: flame.lastStrikeDay,
+      },
     });
-    const level = levelForSouls(updated.souls).level;
-    if (level !== updated.level) {
-      await tx.user.update({ where: { id: user.id }, data: { level } });
-    }
     // ¿Se subió de nivel con ESTE golpe? Se compara con el nivel que daban
     // las almas de antes, no con la columna.
-    const leveledUp = level > levelForSouls(updated.souls - gained).level;
+    const leveledUp = level > levelForSouls(owner.souls).level;
 
     return {
       ok: true,

@@ -3,6 +3,7 @@
 // "import type" no carga Prisma: solo trae el tipo, que desaparece al
 // compilar. Por eso este archivo también se puede usar en el navegador.
 import type { Difficulty } from "@prisma/client";
+import { parseDateInput } from "@/lib/dates";
 
 // Vida que quita cada bloque de estudio.
 export const HP_PER_BLOCK = 100;
@@ -130,6 +131,73 @@ export function levelForSouls(souls: number): LevelProgress {
     soulsIntoLevel: rest,
     nextLevelCost: level < MAX_LEVEL ? LEVEL_COSTS[level - 1] : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+//  La llama (racha diaria)
+// ---------------------------------------------------------------------------
+
+// La llama cuenta DÍAS SEGUIDOS con al menos un golpe asestado. Los días son
+// de calendario en hora de Colombia, como las fechas de entrega: el día del
+// último golpe (User.lastStrikeDay) se guarda a las 00:00 UTC, y "hoy" llega
+// como texto "AAAA-MM-DD" de todayInAppTimeZone(). Las dos funciones reciben
+// "hoy" como parámetro para poder probarlas sin tocar el reloj.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// "AAAA-MM-DD" → Date a las 00:00 UTC. "Hoy" lo da siempre el servidor, así
+// que un texto que no sea una fecha es un error de programación.
+function parseToday(today: string): Date {
+  const date = parseDateInput(today);
+  if (!date) throw new Error(`Día no válido: ${today}`);
+  return date;
+}
+
+// Días de calendario que van del último golpe a hoy: 0 = hoy, 1 = ayer.
+// null si nunca ha golpeado. Los dos Date están a las 00:00 UTC, así que la
+// resta es un múltiplo exacto de un día (Colombia no tiene horario de verano;
+// Math.round solo por si acaso).
+function daysSinceStrike(lastStrikeDay: Date | null, today: Date): number | null {
+  if (!lastStrikeDay) return null;
+  return Math.round((today.getTime() - lastStrikeDay.getTime()) / DAY_MS);
+}
+
+// lit = encendida (golpeó hoy), at-risk = en peligro (golpeó ayer, hoy
+// todavía no), out = apagada (antes de ayer o nunca).
+export type FlameStatus = "lit" | "at-risk" | "out";
+
+export type FlameState = {
+  status: FlameStatus;
+  // El número que se muestra: la racha guardada, o 0 si está apagada.
+  days: number;
+  // Apagada, pero había racha: es cuando sale el aviso "La llama se ha
+  // extinguido". Un usuario que nunca tuvo racha no lo ve.
+  extinguished: boolean;
+};
+
+// Estado de la llama al LEER una página. No escribe nada: la racha guardada
+// solo cambia al golpear, y el estado se deduce cada vez.
+export function flameState(flame: number, lastStrikeDay: Date | null, today: string): FlameState {
+  const days = daysSinceStrike(lastStrikeDay, parseToday(today));
+  // Un día futuro no debería existir; si aparece, cuenta como hoy.
+  if (days !== null && days <= 0) return { status: "lit", days: flame, extinguished: false };
+  if (days === 1) return { status: "at-risk", days: flame, extinguished: false };
+  return { status: "out", days: 0, extinguished: flame > 0 };
+}
+
+// Racha y día que se guardan al asestar un golpe aceptado. Ya golpeó hoy: no
+// cambia (max por si la racha guardada fuera 0 por error). Golpeó ayer: suma
+// 1. Antes o nunca: vuelve a empezar en 1.
+export function flameAfterStrike(
+  flame: number,
+  lastStrikeDay: Date | null,
+  today: string,
+): { flame: number; lastStrikeDay: Date } {
+  const todayDate = parseToday(today);
+  const days = daysSinceStrike(lastStrikeDay, todayDate);
+  if (days !== null && days <= 0) return { flame: Math.max(flame, 1), lastStrikeDay: todayDate };
+  if (days === 1) return { flame: flame + 1, lastStrikeDay: todayDate };
+  return { flame: 1, lastStrikeDay: todayDate };
 }
 
 // ---------------------------------------------------------------------------

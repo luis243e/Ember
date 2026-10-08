@@ -72,7 +72,7 @@ const FEATURES: {
     title: "La llama",
     description:
       "Una racha diaria que premia la constancia. Rómpela y vuelve a empezar; mantenla y arde más fuerte.",
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     icon: Swords,

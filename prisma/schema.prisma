@@ -107,6 +107,11 @@ model User {
   // "Llama": la racha de días seguidos estudiando. Empieza en 0.
   flame        Int      @default(0)
 
+  // Día del último golpe asestado, como las fechas de entrega: el día de
+  // Colombia guardado a las 00:00 UTC. Con él se sabe si la llama sigue
+  // encendida (reglas en lib/game.ts). null = nunca ha golpeado.
+  lastStrikeDay DateTime?
+
   // --- Relación ---
   // Un usuario tiene MUCHAS materias. "Subject[]" (con corchetes) = lista.
   // OJO: esta línea NO crea una columna en la tabla; es un "atajo" para que

@@ -12,13 +12,13 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
 - **Base de datos:** 7 tablas (`User`, `Subject`, `Task`, `StudySession`,
-  `Session`, `Account`, `Verification`), creadas con 7 migraciones. RLS
+  `Session`, `Account`, `Verification`), creadas con 8 migraciones. RLS
   activado en todas, y también en `_prisma_migrations` (a mano).
-  **Producción y desarrollo usan la misma base de Supabase.** Las dos
-  últimas (8 oct) ya están aplicadas en la base compartida:
-  `20261008204127_almas` añade `StudySession.soulsEarned` y
-  `Task.victorySouls` (opcionales), y `20261008204228_boss_key_obligatorio`
-  hace `Task.bossKey` obligatoria. La de la batalla
+  **Producción y desarrollo usan la misma base de Supabase.** La última
+  (8 oct, ya aplicada en la base compartida) es `20261008214803_llama`, que
+  añade `User.lastStrikeDay` (opcional). Antes, `20261008204127_almas` añadió
+  `StudySession.soulsEarned` y `Task.victorySouls` (opcionales), y
+  `20261008204228_boss_key_obligatorio` hizo `Task.bossKey` obligatoria. La de la batalla
   (`20261007210121_batalla`) creó el índice único parcial que permite una
   sola vigilia abierta por usuario.
 - **Funciona:** registro e inicio de sesión con correo y contraseña
@@ -45,8 +45,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   "Atacar". Probada en local (también con `next build` + `next start`); aún
   no en Vercel. Detalles en
   [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md).
-- **Almas y niveles (8 oct, solo en local, sin commit; las migraciones ya
-  están en la base compartida):** cada golpe da de 1 a 100 almas y vencer a
+- **Almas y niveles (8 oct, en `origin/main` desde el commit `d1fc1e1`):** cada golpe da de 1 a 100 almas y vencer a
   un jefe da EASY 100–300, MEDIUM 400–600 o HARD 700–1000, todo al azar en
   el servidor y guardado (`StudySession.soulsEarned`, `Task.victorySouls`).
   El nivel (1–50) se deduce de `User.souls` con la tabla fija
@@ -55,8 +54,17 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de almas). La batalla enseña "+N almas", la recompensa de la victoria y
   la subida de nivel. Probado en local; aún no en Vercel. Detalles en
   [2026-10-08-almas-y-niveles.md](sesiones/2026-10-08-almas-y-niveles.md).
+- **La llama (8 oct, solo en local, sin commit; la migración ya está en la
+  base compartida):** racha de días seguidos con al menos un golpe asestado,
+  en días de calendario de Colombia. Se guardan `User.flame` y
+  `User.lastStrikeDay`, y solo cambian al golpear. Al leer se deduce el
+  estado: encendida (golpe hoy), en peligro (ayer) o apagada (antes o nunca,
+  con 0). Se ve junto al nombre en el bloque del personaje, y las páginas con
+  `AppShell` muestran "La llama se ha extinguido…" si se apagó habiendo
+  racha. Probado en local; aún no en Vercel. Detalles en
+  [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md).
 - **Todavía no existe:** editar o borrar jefes, paso automático de jefes
-  vencidos por fecha a `FAILED`, gastar almas ni rachas (la llama).
+  vencidos por fecha a `FAILED`, gastar almas ni la misión de redención.
 - **Diseño (en producción desde la noche del 6 oct):** `/` es la landing
   pública del Figma ("LANDING FINAL"), estática y adaptable a móvil. Hay base
   visual reutilizable: tokens de color en `app/globals.css`, fuentes Inter,
@@ -175,17 +183,29 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de `serverNow`, y nunca calcula la duración (la recibe como prop). Las
   acciones reciben solo el id de la tarea.
 - **En una transacción con bloqueos, todas las acciones bloquean en el mismo
-  orden:** primero la tarea (`SELECT … FOR UPDATE`), después la vigilia y,
-  por último, el usuario (al sumar almas). Si no, dos peticiones simultáneas
-  pueden esperarse la una a la otra para siempre (interbloqueo).
+  orden: tarea → vigilia → usuario,** y cada fila se bloquea antes de
+  escribirla. La tarea y el usuario se leen con `SELECT … FOR UPDATE`
+  (`bloquearTarea` y `bloquearUsuario` en las acciones de la batalla). La
+  vigilia se bloquea con su propio `UPDATE` condicional, que toma el mismo
+  bloqueo de fila y solo cambia una vigilia abierta. Una acción que no
+  necesite alguna de las tres se la salta, pero nunca cambia el orden. Si no,
+  dos peticiones simultáneas pueden esperarse la una a la otra para siempre
+  (interbloqueo). Con la fila bloqueada se puede leer, calcular en el código
+  y escribir sin `increment`: nadie más la cambia hasta el final.
 - **Transacciones cortas:** se lee con el mismo `SELECT … FOR UPDATE` lo que
   haga falta de la fila bloqueada, se calcula en el código y se escribe una
   sola vez. Cada ida y vuelta a la base alarga el bloqueo (y desde local
   tarda mucho).
+- **La llama se deduce al leer y solo se escribe al golpear.** `flame` y
+  `lastStrikeDay` cambian únicamente en `asestarGolpe`, en la misma escritura
+  del usuario que las almas. Las páginas calculan el estado con
+  `flameState()` y nunca escriben en la base al cargar. `flame` conserva la
+  racha antigua aunque esté apagada: así se sabe cuándo enseñar el aviso.
 - **Las fechas de entrega son días de calendario.** Se guardan a las 00:00
   UTC, se muestran con `timeZone: "UTC"` (`formatDueDate`) y "hoy" se calcula
   en `America/Bogota` (`todayInAppTimeZone`), todo en `lib/dates.ts`. Así el
-  desfase con Vercel, que corre en UTC, no cambia el día.
+  desfase con Vercel, que corre en UTC, no cambia el día. El día del último
+  golpe (`lastStrikeDay`) sigue la misma convención.
 - **Los nombres se normalizan con `normalizeName()`** (`lib/text.ts`) antes
   de validarlos. Materias admite 60 caracteres y jefes 80.
 - **Para conservar un `<select>` tras un error, ponle `key` con su valor.**
@@ -258,9 +278,14 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 
 ## Pendientes
 
-- [ ] **Push de almas y niveles.** Las dos migraciones del 8 oct ya están en
-  la base compartida; las columnas nuevas son opcionales, así que el código
-  desplegado sigue funcionando hasta el push.
+- [ ] **Push de la llama.** La migración `20261008214803_llama` ya está en
+  la base compartida; la columna es opcional, así que el código desplegado
+  sigue funcionando hasta el push.
+- [ ] Probar la llama en Vercel, con lector de pantalla y en Safari y
+  Firefox. No se ha probado un golpe real después de las 7 p. m. de Colombia
+  (el cambio de día lo cubren las pruebas de las funciones puras).
+- [ ] **Misión de redención** (siguiente paso): la tarjeta de los marcos
+  99:2 y 99:165 y los avisos de almas recuperadas o perdidas de 99:313.
 - [ ] Probar almas, niveles y el bloque del personaje en Vercel, con lector
   de pantalla, con movimiento reducido real y en Safari y Firefox.
 - [ ] Cuando llegue el inicio de sesión con Google, comprobar el avatar con
@@ -314,6 +339,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~La llama: racha diaria, tres estados y aviso de llama extinguida~~
+  (8 oct).
+- [x] ~~Push de almas y niveles~~ (commit `d1fc1e1`).
 - [x] ~~Almas por golpe y por victoria, niveles del 1 al 50 y bloque del
   personaje~~ (8 oct).
 - [x] ~~Migración que rellene los `bossKey` nulos y haga la columna
@@ -360,3 +388,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-07 | Diseño de `/mazmorra`, `/mazmorra/invocar` y `/materias` (`AppShell`, barra de vida, consultas de contenedor) | [2026-10-07-diseno-mazmorra-materias.md](sesiones/2026-10-07-diseno-mazmorra-materias.md) |
 | 2026-10-07 | Fase 1: batalla (vigilias, golpe, victoria), migración con índice único parcial, "Atacar" en la mazmorra | [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md) |
 | 2026-10-08 | Fase 1: almas y niveles (tabla fija de 49 costes, bloque del personaje, recompensas en la batalla), `bossKey` obligatoria | [2026-10-08-almas-y-niveles.md](sesiones/2026-10-08-almas-y-niveles.md) |
+| 2026-10-08 | Fase 1: la llama (racha diaria en hora de Colombia, tres estados, aviso de llama extinguida, `bloquearUsuario`) | [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md) |

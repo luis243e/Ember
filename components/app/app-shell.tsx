@@ -3,8 +3,11 @@ import { BookOpen, LogOut, Swords, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cerrarSesion } from "@/app/mazmorra/actions";
 import { CharacterCard, type CharacterUser } from "@/components/app/character-card";
+import { ExtinguishedFlameNotice } from "@/components/app/flame-notice";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { todayInAppTimeZone } from "@/lib/dates";
+import { flameState } from "@/lib/game";
 
 type AppSection = "mazmorra" | "materias";
 
@@ -22,8 +25,8 @@ type AppShellProps = {
   // Sección activa de la navegación.
   active: AppSection;
   // El usuario de requireUser(): nombre, foto y almas del bloque del
-  // personaje.
-  user: CharacterUser;
+  // personaje, y la racha guardada con el día del último golpe para la llama.
+  user: CharacterUser & { flame: number; lastStrikeDay?: Date | null };
   // Cabecera de la página: título (h1) y subtítulo.
   title: string;
   description: string;
@@ -36,6 +39,10 @@ type AppShellProps = {
 // pasa el usuario. El bloque del personaje ("ALMAS Y NIVELES") va bajo el
 // logo en la barra lateral y bajo las pestañas en móvil.
 export function AppShell({ active, user, title, description, children }: AppShellProps) {
+  // La llama se calcula una vez al pintar, con el "hoy" de Colombia, y no se
+  // escribe nada en la base: la racha guardada solo cambia al golpear.
+  const flame = flameState(user.flame, user.lastStrikeDay ?? null, todayInAppTimeZone());
+
   return (
     <div className="flex flex-1 flex-col md:flex-row">
       {/* Escritorio: barra lateral. sticky + h-dvh la mantiene entera a la
@@ -43,7 +50,7 @@ export function AppShell({ active, user, title, description, children }: AppShel
       <header className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col justify-between border-r border-line bg-night-alt px-4 pt-7 pb-5 md:flex">
         <div className="flex flex-col gap-8">
           <Logo className="ml-3 self-start text-2xl tracking-[4px]" />
-          <CharacterCard user={user} />
+          <CharacterCard user={user} flame={flame} />
           <nav aria-label="Principal" className="flex flex-col gap-1">
             {NAV.map(({ section, href, label, icon: Icon }) => {
               const isActive = section === active;
@@ -127,7 +134,7 @@ export function AppShell({ active, user, title, description, children }: AppShel
       {/* Móvil: el bloque del personaje, debajo de las pestañas y ya sobre
           el fondo de la página. */}
       <div className="px-4 pt-4 md:hidden">
-        <CharacterCard user={user} />
+        <CharacterCard user={user} flame={flame} />
       </div>
 
       {/* min-w-0: sin esto, un contenido muy ancho estiraría la columna y
@@ -141,7 +148,12 @@ export function AppShell({ active, user, title, description, children }: AppShel
           </h1>
           <p className="text-sm leading-[normal] text-smoke">{description}</p>
         </div>
-        <div className="px-4 pt-6 pb-8 md:px-8 md:py-10 lg:px-12">{children}</div>
+        <div className="px-4 pt-6 pb-8 md:px-8 md:py-10 lg:px-12">
+          {/* Aviso al entrar: justo debajo de la cabecera, antes del
+              contenido de la página. */}
+          {flame.extinguished && <ExtinguishedFlameNotice />}
+          {children}
+        </div>
       </main>
     </div>
   );
