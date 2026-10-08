@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BookOpen, LogOut, Swords, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cerrarSesion } from "@/app/mazmorra/actions";
+import { CharacterCard, type CharacterUser } from "@/components/app/character-card";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
@@ -20,7 +21,9 @@ const FOCUS_RING =
 type AppShellProps = {
   // Sección activa de la navegación.
   active: AppSection;
-  userName: string;
+  // El usuario de requireUser(): nombre, foto y almas del bloque del
+  // personaje.
+  user: CharacterUser;
   // Cabecera de la página: título (h1) y subtítulo.
   title: string;
   description: string;
@@ -30,8 +33,9 @@ type AppShellProps = {
 // Armazón de las páginas privadas (Figma "MAZMORRA FINAL", "INVOCAR FINAL" y
 // "MATERIAS FINAL"): barra lateral desde md y barra superior con pestañas en
 // móvil. NO comprueba la sesión: cada página llama antes a requireUser() y le
-// pasa el nombre.
-export function AppShell({ active, userName, title, description, children }: AppShellProps) {
+// pasa el usuario. El bloque del personaje ("ALMAS Y NIVELES") va bajo el
+// logo en la barra lateral y bajo las pestañas en móvil.
+export function AppShell({ active, user, title, description, children }: AppShellProps) {
   return (
     <div className="flex flex-1 flex-col md:flex-row">
       {/* Escritorio: barra lateral. sticky + h-dvh la mantiene entera a la
@@ -39,6 +43,7 @@ export function AppShell({ active, userName, title, description, children }: App
       <header className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col justify-between border-r border-line bg-night-alt px-4 pt-7 pb-5 md:flex">
         <div className="flex flex-col gap-8">
           <Logo className="ml-3 self-start text-2xl tracking-[4px]" />
+          <CharacterCard user={user} />
           <nav aria-label="Principal" className="flex flex-col gap-1">
             {NAV.map(({ section, href, label, icon: Icon }) => {
               const isActive = section === active;
@@ -67,16 +72,7 @@ export function AppShell({ active, userName, title, description, children }: App
           </nav>
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-line pt-4">
-          {/* truncate: un nombre muy largo se corta con "…" en vez de
-              ensanchar la barra. title muestra el nombre entero al pasar el
-              ratón. */}
-          <p
-            title={userName}
-            className="truncate pl-3 text-sm leading-[normal] font-semibold text-parchment"
-          >
-            {userName}
-          </p>
+        <div className="border-t border-line pt-4">
           <form action={cerrarSesion}>
             <button type="submit" className={cn(buttonStyles({ variant: "ghost", size: "sm" }), "w-full")}>
               Cerrar sesión
@@ -127,6 +123,12 @@ export function AppShell({ active, userName, title, description, children }: App
           })}
         </nav>
       </header>
+
+      {/* Móvil: el bloque del personaje, debajo de las pestañas y ya sobre
+          el fondo de la página. */}
+      <div className="px-4 pt-4 md:hidden">
+        <CharacterCard user={user} />
+      </div>
 
       {/* min-w-0: sin esto, un contenido muy ancho estiraría la columna y
           aparecería scroll horizontal. */}

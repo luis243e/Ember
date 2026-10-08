@@ -25,7 +25,7 @@ export default async function MateriasPage() {
   return (
     <AppShell
       active="materias"
-      userName={user.name}
+      user={user}
       title="Mis materias"
       description="Cada jefe pertenece a una materia."
     >

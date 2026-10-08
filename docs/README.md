@@ -12,12 +12,15 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
 - **Base de datos:** 7 tablas (`User`, `Subject`, `Task`, `StudySession`,
-  `Session`, `Account`, `Verification`), creadas con 5 migraciones. RLS
+  `Session`, `Account`, `Verification`), creadas con 7 migraciones. RLS
   activado en todas, y también en `_prisma_migrations` (a mano).
-  **Producción y desarrollo usan la misma base de Supabase.** La última,
-  `20261007210121_batalla` (7 oct), ya está aplicada en la base compartida:
-  añade `Task.bossKey` y `StudySession.userId/endsAt/completedAt`, y un
-  índice único parcial que permite una sola vigilia abierta por usuario.
+  **Producción y desarrollo usan la misma base de Supabase.** Las dos
+  últimas (8 oct) ya están aplicadas en la base compartida:
+  `20261008204127_almas` añade `StudySession.soulsEarned` y
+  `Task.victorySouls` (opcionales), y `20261008204228_boss_key_obligatorio`
+  hace `Task.bossKey` obligatoria. La de la batalla
+  (`20261007210121_batalla`) creó el índice único parcial que permite una
+  sola vigilia abierta por usuario.
 - **Funciona:** registro e inicio de sesión con correo y contraseña
   (`/registro`, `/login`), página protegida `/mazmorra` y cierre de sesión.
   En producción se probaron el registro, el login y la redirección de
@@ -30,8 +33,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   producción.
 - **Reglas del juego** en `lib/game.ts`: cada bloque de estudio (vigilia de
   25 minutos) quita 100 de vida. EASY = 2 bloques (200), MEDIUM = 4 (400) y
-  HARD = 6 (600). El bestiario (6 jefes, 2 por dificultad) también vive ahí.
-- **Batalla (7 oct, solo en local, sin commit):** `/mazmorra/batalla/[id]`
+  HARD = 6 (600). El bestiario (6 jefes, 2 por dificultad), las almas y la
+  tabla de niveles también viven ahí.
+- **Batalla (7 oct, en `origin/main` desde el commit `c50ac9e`):** `/mazmorra/batalla/[id]`
   sigue los marcos "BATALLA FINAL" del Figma. Vigilias de 25 minutos con el
   reloj del servidor; abandonar no hace daño; al terminar, "Asestar golpe"
   quita 100 de vida; al llegar a 0, el jefe pasa a `DEFEATED` y se ve
@@ -41,8 +45,18 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   "Atacar". Probada en local (también con `next build` + `next start`); aún
   no en Vercel. Detalles en
   [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md).
+- **Almas y niveles (8 oct, solo en local, sin commit; las migraciones ya
+  están en la base compartida):** cada golpe da de 1 a 100 almas y vencer a
+  un jefe da EASY 100–300, MEDIUM 400–600 o HARD 700–1000, todo al azar en
+  el servidor y guardado (`StudySession.soulsEarned`, `Task.victorySouls`).
+  El nivel (1–50) se deduce de `User.souls` con la tabla fija
+  `LEVEL_COSTS`: 191.998 almas para llegar al 50. Las páginas con
+  `AppShell` muestran el bloque del personaje (avatar, nombre, nivel y barra
+  de almas). La batalla enseña "+N almas", la recompensa de la victoria y
+  la subida de nivel. Probado en local; aún no en Vercel. Detalles en
+  [2026-10-08-almas-y-niveles.md](sesiones/2026-10-08-almas-y-niveles.md).
 - **Todavía no existe:** editar o borrar jefes, paso automático de jefes
-  vencidos por fecha a `FAILED`, almas, niveles ni rachas.
+  vencidos por fecha a `FAILED`, gastar almas ni rachas (la llama).
 - **Diseño (en producción desde la noche del 6 oct):** `/` es la landing
   pública del Figma ("LANDING FINAL"), estática y adaptable a móvil. Hay base
   visual reutilizable: tokens de color en `app/globals.css`, fuentes Inter,
@@ -139,16 +153,35 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   el servidor que la materia sea del usuario.
 - **Las reglas del juego solo viven en `lib/game.ts`.** La vida se calcula en
   el servidor a partir de la dificultad, nunca se lee del formulario. El jefe
-  de una tarea se lee **siempre** con `bossForTask()`: `bossKey` puede faltar
-  en tareas creadas por código viejo.
+  de una tarea se lee **siempre** con `bossForTask()`: `bossKey` es
+  obligatoria desde el 8 oct, pero en la base es un texto cualquiera y
+  `bossForTask()` comprueba que sea un jefe de su dificultad.
+- **Las tiradas al azar (almas) solo se hacen en el servidor, dentro de las
+  acciones** (`rollStrikeSouls`, `rollVictorySouls`). Nunca en el cliente.
+- **El nivel se deduce siempre de `User.souls`** con `levelForSouls()`.
+  `User.souls` es el total ganado y no baja. `User.level` se escribe solo en
+  `asestarGolpe`, en la misma transacción que las almas; la pantalla no lo
+  lee.
+- **`LEVEL_COSTS` es fija: no se regenera.** Se generó una vez el 8 oct
+  (cómo, en la nota de esa sesión). Cambiarla movería de nivel a todo el
+  mundo.
+- **Los números que ve el usuario van con `formatNumber()`** (`lib/text.ts`,
+  `es-CO`: `1.234`). El `es` genérico no agrupa los de cuatro cifras.
+- **`requireUser()` trae `souls`, `level` e `image` frescos** porque Better
+  Auth no tiene `session.cookieCache`. Si algún día se activa, habrá que
+  leerlos aparte.
 - **El reloj de las vigilias es el del servidor.** Inicio y fin se fijan al
   comenzar; el cliente solo pinta la cuenta atrás a partir de esas marcas y
   de `serverNow`, y nunca calcula la duración (la recibe como prop). Las
   acciones reciben solo el id de la tarea.
 - **En una transacción con bloqueos, todas las acciones bloquean en el mismo
-  orden:** primero la tarea (`SELECT … FOR UPDATE`) y después la vigilia. Si
-  no, dos peticiones simultáneas pueden esperarse la una a la otra para
-  siempre (interbloqueo).
+  orden:** primero la tarea (`SELECT … FOR UPDATE`), después la vigilia y,
+  por último, el usuario (al sumar almas). Si no, dos peticiones simultáneas
+  pueden esperarse la una a la otra para siempre (interbloqueo).
+- **Transacciones cortas:** se lee con el mismo `SELECT … FOR UPDATE` lo que
+  haga falta de la fila bloqueada, se calcula en el código y se escribe una
+  sola vez. Cada ida y vuelta a la base alarga el bloqueo (y desde local
+  tarda mucho).
 - **Las fechas de entrega son días de calendario.** Se guardan a las 00:00
   UTC, se muestran con `timeZone: "UTC"` (`formatDueDate`) y "hoy" se calcula
   en `America/Bogota` (`todayInAppTimeZone`), todo en `lib/dates.ts`. Así el
@@ -225,10 +258,13 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 
 ## Pendientes
 
-- [ ] **Después del push de la batalla:** migración que rellene los
-  `bossKey` nulos que haya creado el código viejo (misma regla que
-  `bossForTask()`) y haga la columna `NOT NULL`. Detalles en
-  [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md#pendientes).
+- [ ] **Push de almas y niveles.** Las dos migraciones del 8 oct ya están en
+  la base compartida; las columnas nuevas son opcionales, así que el código
+  desplegado sigue funcionando hasta el push.
+- [ ] Probar almas, niveles y el bloque del personaje en Vercel, con lector
+  de pantalla, con movimiento reducido real y en Safari y Firefox.
+- [ ] Cuando llegue el inicio de sesión con Google, comprobar el avatar con
+  una foto real de otro dominio (`next/image` con `unoptimized`).
 - [ ] Probar la batalla en Vercel (y medir la latencia: desde local cada
   acción tarda ~3 s), con lector de pantalla, con movimiento reducido real y
   en Safari y Firefox.
@@ -278,6 +314,10 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Almas por golpe y por victoria, niveles del 1 al 50 y bloque del
+  personaje~~ (8 oct).
+- [x] ~~Migración que rellene los `bossKey` nulos y haga la columna
+  `NOT NULL`~~ (8 oct, `20261008204228_boss_key_obligatorio`; había 0 nulos).
 - [x] ~~Batalla: vigilias, golpe, victoria y "Atacar" en las tarjetas de jefe
   reutilizando `HpBar`~~ (7 oct).
 - [x] ~~Rediseñar `/materias`, `/mazmorra` y `/mazmorra/invocar`~~ (7 oct).
@@ -319,3 +359,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-07 | Diseño de `/login` y `/registro`, errores en español y arreglo del 500 | [2026-10-07-diseno-login-registro.md](sesiones/2026-10-07-diseno-login-registro.md) |
 | 2026-10-07 | Diseño de `/mazmorra`, `/mazmorra/invocar` y `/materias` (`AppShell`, barra de vida, consultas de contenedor) | [2026-10-07-diseno-mazmorra-materias.md](sesiones/2026-10-07-diseno-mazmorra-materias.md) |
 | 2026-10-07 | Fase 1: batalla (vigilias, golpe, victoria), migración con índice único parcial, "Atacar" en la mazmorra | [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md) |
+| 2026-10-08 | Fase 1: almas y niveles (tabla fija de 49 costes, bloque del personaje, recompensas en la batalla), `bossKey` obligatoria | [2026-10-08-almas-y-niveles.md](sesiones/2026-10-08-almas-y-niveles.md) |

@@ -28,7 +28,7 @@ export default async function InvocarPage() {
     // "Mi mazmorra" queda marcada: invocar es parte de la mazmorra.
     <AppShell
       active="mazmorra"
-      userName={user.name}
+      user={user}
       title="Invocar nuevo jefe"
       description="Convierte una entrega en un enemigo."
     >

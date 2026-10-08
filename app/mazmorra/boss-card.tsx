@@ -15,7 +15,7 @@ type BossCardProps = {
     name: string;
     dueDate: Date;
     difficulty: Difficulty;
-    bossKey: string | null;
+    bossKey: string;
     maxHp: number;
     currentHp: number;
     subject: { name: string };

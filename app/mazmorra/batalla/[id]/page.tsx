@@ -20,6 +20,7 @@ const getTask = cache(async (id: string, userId: string) =>
       maxHp: true,
       currentHp: true,
       status: true,
+      victorySouls: true,
       subject: { select: { name: true } },
     },
   }),
@@ -40,7 +41,7 @@ export async function generateMetadata({
 type OwnTask = NonNullable<Awaited<ReturnType<typeof getTask>>>;
 
 async function loadBattle(task: OwnTask, userId: string) {
-  const [openVigil, stats] = await Promise.all([
+  const [openVigil, stats, finalStrike] = await Promise.all([
     // La vigilia abierta del usuario, sea de este jefe o de otro (solo puede
     // haber una: lo garantiza un índice único de la base).
     prisma.studySession.findFirst({
@@ -53,6 +54,15 @@ async function loadBattle(task: OwnTask, userId: string) {
       _count: true,
       _sum: { durationMinutes: true },
     }),
+    // Solo si ya cayó: la última vigilia cumplida es la del golpe final, y
+    // guarda sus almas.
+    task.status === "DEFEATED"
+      ? prisma.studySession.findFirst({
+          where: { taskId: task.id, completedAt: { not: null } },
+          orderBy: { completedAt: "desc" },
+          select: { soulsEarned: true },
+        })
+      : null,
   ]);
 
   const boss = bossForTask(task);
@@ -81,6 +91,13 @@ async function loadBattle(task: OwnTask, userId: string) {
     // diferencia con su propio reloj.
     serverNow: Date.now(),
     summary: { vigils: stats._count, minutes: stats._sum.durationMinutes ?? 0 },
+    // Recompensa de la victoria, sacada de lo guardado: sigue saliendo al
+    // recargar. null si el jefe sigue vivo o cayó antes de que existieran las
+    // almas (no hay almas retroactivas).
+    reward:
+      task.victorySouls !== null && finalStrike?.soulsEarned != null
+        ? { strikeSouls: finalStrike.soulsEarned, victorySouls: task.victorySouls }
+        : null,
   };
 }
 

@@ -12,6 +12,7 @@ import { Eyebrow } from "@/components/ui/eyebrow";
 import { HpBar } from "@/components/ui/hp-bar";
 import { cn } from "@/lib/cn";
 import { HP_PER_BLOCK } from "@/lib/game";
+import { formatNumber } from "@/lib/text";
 import {
   abandonarVigilia,
   asestarGolpe,
@@ -38,6 +39,8 @@ type BatallaProps = {
   durationMs: number;
   serverNow: number;
   summary: { vigils: number; minutes: number };
+  // Almas guardadas del golpe final y de la victoria, o null.
+  reward: { strikeSouls: number; victorySouls: number } | null;
 };
 
 // idle = sin vigilia; running = vigilia en curso; ready = cumplida, falta el
@@ -67,6 +70,7 @@ export function Batalla({
   durationMs,
   serverNow,
   summary,
+  reward,
 }: BatallaProps) {
   // Hora actual, siempre en la escala del SERVIDOR. Empieza en serverNow para
   // que el primer pintado del navegador coincida con el del servidor.
@@ -76,8 +80,13 @@ export function Batalla({
   // Texto de la región viva: solo cambios de estado, nunca cada segundo.
   const [announcement, setAnnouncement] = useState("");
   const [confirming, setConfirming] = useState(false);
-  // Golpes asestados en esta visita: su número reinicia el tajo y el "−100".
+  // Golpes asestados en esta visita: su número reinicia el tajo, el "−100" y
+  // el "+N almas" (las del último golpe, que da la acción).
   const [strikes, setStrikes] = useState(0);
+  const [strikeSouls, setStrikeSouls] = useState(0);
+  // Nivel alcanzado con el último golpe. Solo vive aquí, en el momento: al
+  // recargar o con la siguiente acción desaparece.
+  const [newLevel, setNewLevel] = useState<number | null>(null);
   const [hitting, setHitting] = useState(false);
   const [justDefeated, setJustDefeated] = useState(false);
   const paused = useSyncExternalStore(subscribePause, readPause, () => false);
@@ -146,6 +155,7 @@ export function Batalla({
     onOk: (result: Extract<ResultadoBatalla, { ok: true }>) => void,
   ) {
     setError(null);
+    setNewLevel(null);
     startTransition(async () => {
       const result = await action(task.id);
       setConfirming(false);
@@ -165,14 +175,20 @@ export function Batalla({
       setConfirming(true);
     } else if (phase === "ready") {
       run(asestarGolpe, (result) => {
+        const souls = result.strikeSouls ?? 0;
         setStrikes((n) => n + 1);
+        setStrikeSouls(souls);
         setHitting(true);
+        setNewLevel(result.newLevel ?? null);
+        const levelText = result.newLevel ? ` Has alcanzado el nivel ${result.newLevel}.` : "";
         if (result.defeated) {
           setJustDefeated(true);
-          setAnnouncement("Abominación vencida.");
+          setAnnouncement(
+            `Abominación vencida. Ganas ${formatNumber(souls)} almas del golpe y ${formatNumber(result.victorySouls ?? 0)} por la victoria.${levelText}`,
+          );
         } else {
           setAnnouncement(
-            `Golpe asestado. Al jefe le quedan ${result.currentHp} de ${task.maxHp} de vida.`,
+            `Golpe asestado. Ganas ${formatNumber(souls)} almas. Al jefe le quedan ${result.currentHp} de ${task.maxHp} de vida.${levelText}`,
           );
         }
       });
@@ -282,15 +298,19 @@ export function Batalla({
               className="pointer-events-none absolute inset-0 bg-radial from-transparent from-55% to-night/70"
             />
 
-            {/* Tajo y "−100". key: cada golpe crea elementos nuevos y la
-                animación vuelve a empezar. Con movimiento reducido el tajo
-                no aparece y el número solo se desvanece. */}
+            {/* Tajo, "−100" y "+N almas". key: cada golpe crea elementos
+                nuevos y la animación vuelve a empezar. Los dos números suben
+                juntos. Con movimiento reducido el tajo no aparece y los
+                números solo aparecen y se desvanecen. */}
             {strikes > 0 && (
               <div key={strikes} aria-hidden className="pointer-events-none absolute inset-0">
                 <div className="absolute top-1/2 left-[15%] h-1 w-[70%] rounded-full bg-linear-to-r from-transparent via-parchment to-transparent opacity-0 shadow-[0_0_18px_var(--color-ember)] motion-safe:animate-slash" />
-                <p className="absolute top-[34%] left-1/2 -translate-x-1/2 font-display text-4xl font-bold text-gold-bright opacity-0 [text-shadow:0_2px_12px_var(--color-night)] motion-safe:animate-rise motion-reduce:animate-fade-out @2xl:text-6xl">
-                  −{HP_PER_BLOCK}
-                </p>
+                <div className="absolute top-[34%] left-1/2 flex -translate-x-1/2 flex-col items-center gap-1 font-display leading-[normal] font-bold whitespace-nowrap opacity-0 [text-shadow:0_2px_12px_var(--color-night)] motion-safe:animate-rise motion-reduce:animate-fade-out">
+                  <p className="text-4xl text-gold-bright @2xl:text-6xl">−{HP_PER_BLOCK}</p>
+                  <p className="text-base tracking-[1px] text-parchment @2xl:text-[22px]">
+                    +{formatNumber(strikeSouls)} almas
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -433,6 +453,27 @@ export function Batalla({
               <p className="text-[15px] leading-normal wrap-anywhere text-ash @2xl:text-[17px]">
                 {victorySentence(task.name, summary)}
               </p>
+              {(reward || newLevel) && (
+                <div className="flex flex-col items-center gap-1.5 leading-[normal]">
+                  {/* En una línea con el punto en medio desde @md (28rem); en
+                      pantallas más estrechas no cabe, y cada parte va en su
+                      línea, sin punto. */}
+                  {reward && (
+                    <p className="text-[15px] font-semibold text-gold-bright @2xl:text-[17px]">
+                      <span className="block whitespace-nowrap @md:inline">
+                        +{formatNumber(reward.strikeSouls)} almas del golpe
+                      </span>{" "}
+                      <span className="hidden @md:inline">
+                        <span className="mx-1">·</span>{" "}
+                      </span>
+                      <span className="block whitespace-nowrap @md:inline">
+                        +{formatNumber(reward.victorySouls)} almas por la victoria
+                      </span>
+                    </p>
+                  )}
+                  {newLevel && <LevelUp level={newLevel} />}
+                </div>
+              )}
               <ButtonLink href="/mazmorra" className="mt-4">
                 Volver a la mazmorra
               </ButtonLink>
@@ -444,6 +485,10 @@ export function Batalla({
         {!defeated && (
           <div className="flex w-full flex-col gap-3 px-4 pt-5 pb-8 @2xl:max-w-3xl @2xl:items-center @2xl:p-0">
             {error && <Alert className="w-full @2xl:w-auto">{error}</Alert>}
+            {/* Si el golpe fue el final, el nivel sale en la victoria: aquí
+                no, ni en el instante en que llega la respuesta y la página
+                aún no se ha repintado. */}
+            {newLevel && !justDefeated && <LevelUp level={newLevel} />}
             {otherVigil && phase === "idle" && (
               <p className="text-center text-[13px] leading-normal text-ash">
                 Ya tienes una vigilia en curso contra «{otherVigil.taskName}». Termínala o
@@ -471,6 +516,16 @@ export function Batalla({
         {announcement}
       </p>
     </div>
+  );
+}
+
+// "HAS ALCANZADO EL NIVEL 8": en la victoria o, con un golpe normal, debajo
+// de la escena.
+function LevelUp({ level }: { level: number }) {
+  return (
+    <p className="text-center font-display text-sm leading-[normal] font-bold tracking-[3px] text-ember uppercase @2xl:text-base">
+      Has alcanzado el nivel {level}
+    </p>
   );
 }
 

@@ -86,7 +86,7 @@ const FEATURES: {
     title: "Almas y niveles",
     description:
       "Cada jefe vencido te hace más fuerte. Tu personaje crece con cada hora que inviertes.",
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     icon: Shield,

@@ -41,7 +41,7 @@ export default async function MazmorraPage() {
   return (
     <AppShell
       active="mazmorra"
-      userName={user.name}
+      user={user}
       title={`Tu mazmorra, ${user.name}`}
       description={bossesSentence(tasks.length)}
     >

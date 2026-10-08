@@ -56,6 +56,83 @@ export function vigilDurationMs(): number {
 }
 
 // ---------------------------------------------------------------------------
+//  Almas y niveles
+// ---------------------------------------------------------------------------
+
+// Entero al azar entre min y max, los dos incluidos. Las tiradas solo se hacen
+// en el servidor, dentro de las acciones: si las hiciera el navegador, el
+// usuario podría elegir su resultado. Math.random basta: no es un dato de
+// seguridad.
+function randomInt(min: number, max: number): number {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+// Almas que da cada golpe asestado.
+export const STRIKE_SOULS = { min: 1, max: 100 };
+
+export function rollStrikeSouls(): number {
+  return randomInt(STRIKE_SOULS.min, STRIKE_SOULS.max);
+}
+
+// Almas extra por vencer a un jefe, según su dificultad. El golpe final da
+// las dos cosas: las del golpe y las de la victoria.
+export const VICTORY_SOULS: Record<Difficulty, { min: number; max: number }> = {
+  EASY: { min: 100, max: 300 },
+  MEDIUM: { min: 400, max: 600 },
+  HARD: { min: 700, max: 1000 },
+};
+
+export function rollVictorySouls(difficulty: Difficulty): number {
+  const { min, max } = VICTORY_SOULS[difficulty];
+  return randomInt(min, max);
+}
+
+// Se empieza en el nivel 1 y no se pasa del 50.
+export const MAX_LEVEL = 50;
+
+// Almas que cuesta cada nivel: LEVEL_COSTS[0] es pasar del 1 al 2,
+// LEVEL_COSTS[48] del 49 al 50. Cada coste es el anterior más un porcentaje
+// al azar entre el 5 % y el 10 %, redondeado a entero. Se generó UNA sola vez
+// (8 oct 2026) con un script que no está en el repositorio (ver
+// docs/sesiones/2026-10-08-almas-y-niveles.md) y es igual para todos. NO LA
+// CAMBIES: el nivel de cada usuario se deduce de sus almas con esta tabla, y
+// cambiarla movería de nivel a todo el mundo. En total, 191_998 almas para
+// llegar al 50.
+export const LEVEL_COSTS: readonly number[] = [
+  500, 527, 558, 598, 637, 697, 751,
+  790, 863, 933, 997, 1_061, 1_146, 1_237,
+  1_319, 1_406, 1_494, 1_578, 1_667, 1_761, 1_868,
+  2_041, 2_216, 2_408, 2_613, 2_757, 2_984, 3_158,
+  3_397, 3_601, 3_859, 4_145, 4_558, 4_802, 5_047,
+  5_355, 5_713, 6_176, 6_488, 6_950, 7_563, 7_970,
+  8_596, 9_372, 10_240, 10_766, 11_484, 12_285, 13_066,
+];
+
+export type LevelProgress = {
+  level: number;
+  // Almas ganadas desde que se alcanzó este nivel. En el 50 siguen sumando.
+  soulsIntoLevel: number;
+  // Lo que cuesta el siguiente nivel, o null en el nivel máximo.
+  nextLevelCost: number | null;
+};
+
+// El nivel se deduce SIEMPRE del total de almas (User.souls), nunca al revés:
+// se van restando los costes desde el nivel 1 mientras alcance.
+export function levelForSouls(souls: number): LevelProgress {
+  let level = 1;
+  let rest = Math.max(0, souls);
+  while (level < MAX_LEVEL && rest >= LEVEL_COSTS[level - 1]) {
+    rest -= LEVEL_COSTS[level - 1];
+    level++;
+  }
+  return {
+    level,
+    soulsIntoLevel: rest,
+    nextLevelCost: level < MAX_LEVEL ? LEVEL_COSTS[level - 1] : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 //  Bestiario
 // ---------------------------------------------------------------------------
 
@@ -111,10 +188,9 @@ export const BESTIARY: Record<BossKey, Boss> = {
   },
 };
 
-// Jefes posibles de cada dificultad. EL ORDEN IMPORTA: la migración
-// 20261007210121_batalla rellenó las tareas antiguas con esta misma lista y la
-// misma regla que bossForTask(). Si lo cambias, las tareas sin bossKey
-// cambiarían de jefe.
+// Jefes posibles de cada dificultad. EL ORDEN IMPORTA: las migraciones
+// 20261007210121_batalla y 20261008204228_boss_key_obligatorio rellenaron las
+// tareas antiguas con esta misma lista y la misma regla que bossForTask().
 export const BOSSES_BY_DIFFICULTY: Record<Difficulty, readonly BossKey[]> = {
   EASY: ["centinela-de-huesos", "rata-de-las-cloacas"],
   MEDIUM: ["ogro-de-las-ruinas", "caballero-hueco"],
@@ -129,12 +205,13 @@ export function randomBossFor(difficulty: Difficulty): BossKey {
 
 // El jefe de una tarea: el guardado, si es uno de su dificultad, o si no uno
 // determinista a partir de su id (el código del último carácter, módulo el
-// número de opciones). Es la ÚNICA forma de leer el jefe de una tarea: las
-// tareas creadas por el código anterior no tienen bossKey.
+// número de opciones). Es la ÚNICA forma de leer el jefe de una tarea: en la
+// base bossKey es un texto cualquiera, y aquí se comprueba que sea un jefe
+// de verdad y de su dificultad.
 export function bossForTask(task: {
   id: string;
   difficulty: Difficulty;
-  bossKey: string | null;
+  bossKey: string;
 }): Boss {
   const options = BOSSES_BY_DIFFICULTY[task.difficulty];
   const saved = options.find((key) => key === task.bossKey);

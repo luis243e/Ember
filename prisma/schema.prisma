@@ -270,10 +270,15 @@ model Task {
 
   // Qué criatura es el jefe: la clave del bestiario de lib/game.ts, que es
   // también el nombre de su ilustración (public/jefes/<clave>.webp). La elige
-  // el servidor al invocar. Es opcional porque el código anterior crea tareas
-  // sin ella: para leerla usa SIEMPRE bossForTask(), que da uno determinista
-  // si falta.
-  bossKey     String?
+  // el servidor al invocar. Obligatoria desde la migración
+  // 20261008204228_boss_key_obligatorio, que rellenó las que faltaban. Para leerla
+  // usa SIEMPRE bossForTask(), que comprueba que sea de su dificultad.
+  bossKey     String
+
+  // Almas que dio la victoria (sin las del golpe final, que van en su
+  // vigilia). La tira el servidor al vencer al jefe. null = sigue vivo, o cayó
+  // antes de que existieran las almas (no hay almas retroactivas).
+  victorySouls Int?
 
   // Una tarea tiene MUCHAS sesiones de estudio.
   sessions    StudySession[]
@@ -312,6 +317,10 @@ model StudySession {
 
   // Duración de la sesión en minutos.
   durationMinutes Int
+
+  // Almas que dio el golpe de esta vigilia (1–100, al azar en el servidor).
+  // null = sigue abierta, o se cumplió antes de que existieran las almas.
+  soulsEarned     Int?
 
   // Índice para buscar rápido las sesiones de una tarea.
   @@index([taskId])
