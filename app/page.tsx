@@ -79,7 +79,7 @@ const FEATURES: {
     title: "Combate real",
     description:
       "No marcas tareas como hechas: las derrotas estudiando. El progreso es tuyo porque te lo ganaste.",
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     icon: Sparkles,

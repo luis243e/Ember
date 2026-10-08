@@ -116,6 +116,9 @@ model User {
   // Sesiones abiertas y formas de entrar del usuario (tablas de Better Auth).
   sessions     Session[]
   accounts     Account[]
+
+  // Vigilias (sesiones de estudio) del usuario, de todos sus jefes.
+  studySessions StudySession[]
 }
 
 
@@ -265,6 +268,13 @@ model Task {
   // Estado del combate. Toda tarea nueva empieza como ALIVE.
   status      TaskStatus @default(ALIVE)
 
+  // Qué criatura es el jefe: la clave del bestiario de lib/game.ts, que es
+  // también el nombre de su ilustración (public/jefes/<clave>.webp). La elige
+  // el servidor al invocar. Es opcional porque el código anterior crea tareas
+  // sin ella: para leerla usa SIEMPRE bossForTask(), que da uno determinista
+  // si falta.
+  bossKey     String?
+
   // Una tarea tiene MUCHAS sesiones de estudio.
   sessions    StudySession[]
 
@@ -273,7 +283,9 @@ model Task {
 }
 
 
-// ========== SESIÓN DE ESTUDIO ==========
+// ========== SESIÓN DE ESTUDIO (VIGILIA) ==========
+// Una fila por vigilia: se crea al comenzarla, se cierra (completedAt) al
+// asestar el golpe y se borra si se abandona.
 model StudySession {
   id              String   @id @default(cuid())
 
@@ -281,12 +293,28 @@ model StudySession {
   taskId          String
   task            Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
+  // Dueño de la vigilia. Task no tiene userId, pero aquí hace falta: la base
+  // garantiza "una sola vigilia abierta por usuario" con un índice único
+  // parcial sobre esta columna (ver la migración 20261007210121_batalla; Prisma
+  // no sabe escribirlo en este archivo).
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // Momento en que empezó la sesión. Por defecto, "ahora".
   startedAt       DateTime @default(now())
+
+  // Cuándo termina. Se fija al comenzar con la hora del servidor; el golpe
+  // solo vale a partir de este momento.
+  endsAt          DateTime
+
+  // Cuándo se asestó el golpe. null = la vigilia sigue abierta.
+  completedAt     DateTime?
 
   // Duración de la sesión en minutos.
   durationMinutes Int
 
   // Índice para buscar rápido las sesiones de una tarea.
   @@index([taskId])
+  // Y las de un usuario (lo usa también el borrado en cascada del usuario).
+  @@index([userId])
 }

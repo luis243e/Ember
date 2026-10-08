@@ -31,6 +31,7 @@ export default async function MazmorraPage() {
       name: true,
       dueDate: true,
       difficulty: true,
+      bossKey: true,
       maxHp: true,
       currentHp: true,
       subject: { select: { name: true } },
@@ -79,8 +80,8 @@ export default async function MazmorraPage() {
               barra lateral ya está siempre, así que la ventana sirve de
               referencia. */}
           <ul className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-2 xl:grid-cols-3">
-            {tasks.map((task) => (
-              <BossCard key={task.id} task={task} />
+            {tasks.map((task, index) => (
+              <BossCard key={task.id} task={task} eager={index === 0} />
             ))}
           </ul>
         </section>

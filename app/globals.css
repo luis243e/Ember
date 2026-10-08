@@ -16,6 +16,122 @@
   --color-hp-empty: #262429;
   --color-ember: #e58c40;
   --color-ember-deep: #1f1412;
+
+  /* Movimientos de la batalla. Cada --animate-x da la clase animate-x. Se
+     usan con motion-safe: (o motion-reduce: la versión quieta), así que con
+     prefers-reduced-motion no hay respiración, sacudida ni destello. */
+  /* Respiración lenta de la escena: va y vuelve sin parar. */
+  --animate-drift: drift 7s ease-in-out infinite alternate;
+  /* Sacudida y destello al recibir un golpe. */
+  --animate-struck: struck 0.6s ease-out;
+  /* El jefe cae: destello y se queda en gris (forwards = conserva el final). */
+  --animate-perish: perish 1.4s ease-out forwards;
+  /* El tajo: una línea que cruza la escena y se apaga. */
+  --animate-slash: slash 0.5s ease-out forwards;
+  /* "−100" que sube y se desvanece. */
+  --animate-rise: rise 1.2s ease-out forwards;
+  /* Versión quieta de rise para movimiento reducido: solo se desvanece. */
+  --animate-fade-out: fade-out 1.2s ease-in forwards;
+  /* El texto de victoria aparece cuando el jefe ya cayó. */
+  --animate-reveal: reveal 0.6s ease-out 1s both;
+
+  @keyframes drift {
+    to {
+      transform: scale(1.04);
+    }
+  }
+
+  @keyframes struck {
+    0% {
+      transform: translate(0, 0);
+      filter: none;
+    }
+    12% {
+      transform: translate(1.4%, -0.8%);
+      filter: brightness(2.6) saturate(0.3);
+    }
+    30% {
+      transform: translate(-1.1%, 0.6%);
+      filter: brightness(1.4);
+    }
+    48% {
+      transform: translate(0.7%, -0.3%);
+      filter: none;
+    }
+    66% {
+      transform: translate(-0.4%, 0.2%);
+    }
+    100% {
+      transform: translate(0, 0);
+    }
+  }
+
+  @keyframes perish {
+    0% {
+      filter: none;
+      opacity: 1;
+    }
+    25% {
+      filter: brightness(2.2) saturate(0.2);
+    }
+    100% {
+      filter: grayscale(1) brightness(0.55);
+      opacity: 0.9;
+    }
+  }
+
+  /* El giro va dentro de cada paso porque transform se reemplaza entero. */
+  @keyframes slash {
+    0% {
+      transform: rotate(-24deg) scaleX(0);
+      opacity: 0;
+    }
+    15% {
+      opacity: 1;
+    }
+    45% {
+      transform: rotate(-24deg) scaleX(1);
+      opacity: 1;
+    }
+    100% {
+      transform: rotate(-24deg) scaleX(1);
+      opacity: 0;
+    }
+  }
+
+  @keyframes rise {
+    0% {
+      opacity: 0;
+      transform: translateY(20%) scale(0.8);
+    }
+    20% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-120%) scale(1);
+    }
+  }
+
+  @keyframes fade-out {
+    0%,
+    40% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes reveal {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
 
 /* next/font define estas variables en <html> (app/layout.tsx). Con "inline"

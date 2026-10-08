@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
-import { isDifficulty, maxHpFor } from "@/lib/game";
+import { isDifficulty, maxHpFor, randomBossFor } from "@/lib/game";
 import { parseDateInput, todayInAppTimeZone } from "@/lib/dates";
 import { normalizeName } from "@/lib/text";
 
@@ -61,7 +61,7 @@ export async function invocarJefe(
   });
   if (!subject) return fallo("Elige una de tus materias.");
 
-  // La vida se calcula aquí, nunca se lee del formulario.
+  // La vida y el jefe se deciden aquí, nunca se leen del formulario.
   const maxHp = maxHpFor(difficulty);
   await prisma.task.create({
     data: {
@@ -72,6 +72,7 @@ export async function invocarJefe(
       maxHp,
       currentHp: maxHp,
       status: "ALIVE",
+      bossKey: randomBossFor(difficulty),
     },
   });
 

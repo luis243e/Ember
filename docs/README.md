@@ -12,9 +12,12 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
 - **Base de datos:** 7 tablas (`User`, `Subject`, `Task`, `StudySession`,
-  `Session`, `Account`, `Verification`), creadas con 4 migraciones. RLS
+  `Session`, `Account`, `Verification`), creadas con 5 migraciones. RLS
   activado en todas, y también en `_prisma_migrations` (a mano).
-  **Producción y desarrollo usan la misma base de Supabase.**
+  **Producción y desarrollo usan la misma base de Supabase.** La última,
+  `20261007210121_batalla` (7 oct), ya está aplicada en la base compartida:
+  añade `Task.bossKey` y `StudySession.userId/endsAt/completedAt`, y un
+  índice único parcial que permite una sola vigilia abierta por usuario.
 - **Funciona:** registro e inicio de sesión con correo y contraseña
   (`/registro`, `/login`), página protegida `/mazmorra` y cierre de sesión.
   En producción se probaron el registro, el login y la redirección de
@@ -25,10 +28,21 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   jefes vivos ordenados por fecha, con la vida en texto (`400 / 400`) y en
   una barra por bloques. Lo funcional es del 6 oct; aún no se ha probado en
   producción.
-- **Reglas del juego** en `lib/game.ts`: cada bloque de estudio quita 100 de
-  vida. EASY = 2 bloques (200), MEDIUM = 4 (400) y HARD = 6 (600).
-- **Todavía no existe:** batalla (sesiones de estudio), editar o borrar jefes,
-  ni paso automático de jefes vencidos a `FAILED`.
+- **Reglas del juego** en `lib/game.ts`: cada bloque de estudio (vigilia de
+  25 minutos) quita 100 de vida. EASY = 2 bloques (200), MEDIUM = 4 (400) y
+  HARD = 6 (600). El bestiario (6 jefes, 2 por dificultad) también vive ahí.
+- **Batalla (7 oct, solo en local, sin commit):** `/mazmorra/batalla/[id]`
+  sigue los marcos "BATALLA FINAL" del Figma. Vigilias de 25 minutos con el
+  reloj del servidor; abandonar no hace daño; al terminar, "Asestar golpe"
+  quita 100 de vida; al llegar a 0, el jefe pasa a `DEFEATED` y se ve
+  "ABOMINACIÓN VENCIDA". Escena con la ilustración del jefe
+  (`public/jefes/*.webp`) y animaciones solo en CSS, con pausa y respeto a
+  `prefers-reduced-motion`. La mazmorra muestra la miniatura de cada jefe y
+  "Atacar". Probada en local (también con `next build` + `next start`); aún
+  no en Vercel. Detalles en
+  [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md).
+- **Todavía no existe:** editar o borrar jefes, paso automático de jefes
+  vencidos por fecha a `FAILED`, almas, niveles ni rachas.
 - **Diseño (en producción desde la noche del 6 oct):** `/` es la landing
   pública del Figma ("LANDING FINAL"), estática y adaptable a móvil. Hay base
   visual reutilizable: tokens de color en `app/globals.css`, fuentes Inter,
@@ -45,13 +59,14 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   solo el formulario es componente de cliente. Piezas nuevas reutilizables:
   `TextField` (con `inputStyles`) y `Alert`. Los errores de Better Auth salen
   en español (`lib/auth-errors.ts`).
-- **Mazmorra, invocar y materias con diseño (7 oct, solo en local, sin
-  commit):** siguen los marcos "MAZMORRA FINAL", "INVOCAR FINAL" y "MATERIAS
+- **Mazmorra, invocar y materias con diseño (7 oct, en `origin/main` desde
+  el commit `d93333b`):** siguen los marcos "MAZMORRA FINAL", "INVOCAR FINAL" y "MATERIAS
   FINAL" (y sus versiones vacía y móvil). Comparten el armazón
   `components/app/app-shell.tsx` (barra lateral desde 768 px; barra superior
   con pestañas en móvil). Piezas nuevas en `components/ui/`: `HpBar` (barra de
-  vida por bloques), `SpriteSlot` (hueco del sprite), `EmptyState`, el botón
-  de 48 px (`size: "md"`) y `selectStyles`. El formulario de materias ya
+  vida por bloques), `EmptyState`, el botón de 48 px (`size: "md"`) y
+  `selectStyles`. (`SpriteSlot` se borró en la sesión de la batalla: la
+  tarjeta ya muestra la miniatura real.) El formulario de materias ya
   conserva lo escrito si hay error.
 
 ## Cómo arrancar en un equipo nuevo
@@ -83,8 +98,23 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Nunca editar una migración ya aplicada.** Se cambia el schema y se crea
   una migración nueva.
 - **Revisar el SQL antes de aplicarlo:** `migrate dev --create-only` una sola
-  vez, leer el archivo y después `migrate dev`. Hacerlo dos veces la aplica sin
-  revisión.
+  vez, leer el archivo y después **`migrate deploy`** + `prisma generate` (con
+  el servidor de desarrollo parado). `deploy` solo aplica lo pendiente y nunca
+  propone reiniciar la base, que es también la de producción. Antes de
+  aplicar, comprobar que `migrate status` solo muestra esa migración. Si algún
+  comando ofrece un reset o habla de drift, parar. Si una migración falla a
+  medias, no arreglar nada a mano sobre la base.
+- **Lo que Prisma no sabe escribir en el schema (índices parciales) va a mano
+  en la migración,** y antes de aplicarla se comprueba con
+  `prisma migrate diff --from-migrations … --to-schema-datamodel …` contra una
+  base temporal (nombre único, borrada en un `finally`, sin imprimir la URL)
+  que Prisma no lo borraría en la siguiente migración. Prisma 6.19.3 ignora
+  los índices parciales.
+- **El SQL a mano va siempre con `$queryRaw`/`$executeRaw` de plantilla**
+  (parametrizado), nunca con `$queryRawUnsafe`.
+- **Una columna nueva tiene que ser compatible con el código que sigue
+  desplegado** hasta el push (opcional, o con un valor por defecto), porque
+  la migración llega a producción antes que el código.
 - **Las migraciones hechas en local llegan a producción al instante.** Como
   las dos comparten la base, `migrate dev` cambia también la de producción.
   Si una migración borra o renombra algo, haz el push justo después: hasta
@@ -108,7 +138,17 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   materia** (`subject: { userId: user.id }`), y al crear uno se comprueba en
   el servidor que la materia sea del usuario.
 - **Las reglas del juego solo viven en `lib/game.ts`.** La vida se calcula en
-  el servidor a partir de la dificultad, nunca se lee del formulario.
+  el servidor a partir de la dificultad, nunca se lee del formulario. El jefe
+  de una tarea se lee **siempre** con `bossForTask()`: `bossKey` puede faltar
+  en tareas creadas por código viejo.
+- **El reloj de las vigilias es el del servidor.** Inicio y fin se fijan al
+  comenzar; el cliente solo pinta la cuenta atrás a partir de esas marcas y
+  de `serverNow`, y nunca calcula la duración (la recibe como prop). Las
+  acciones reciben solo el id de la tarea.
+- **En una transacción con bloqueos, todas las acciones bloquean en el mismo
+  orden:** primero la tarea (`SELECT … FOR UPDATE`) y después la vigilia. Si
+  no, dos peticiones simultáneas pueden esperarse la una a la otra para
+  siempre (interbloqueo).
 - **Las fechas de entrega son días de calendario.** Se guardan a las 00:00
   UTC, se muestran con `timeZone: "UTC"` (`formatDueDate`) y "hoy" se calcula
   en `America/Bogota` (`todayInAppTimeZone`), todo en `lib/dates.ts`. Así el
@@ -159,7 +199,15 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   JavaScript del necesario.
 - **Lo que se mueve solo lleva forma de pausarlo y respeta
   `prefers-reduced-motion`** (WCAG 2.2.2). Si basta con CSS o HTML (como
-  `<source media>`), sin JavaScript.
+  `<source media>`), sin JavaScript. Las animaciones son tokens
+  `--animate-*` en `@theme` y se usan con `motion-safe:`. Para pausar una
+  animación declarada con el atajo `animation`, estilo en línea
+  (`animationPlayState`): una clase pierde ante el atajo.
+- **Un botón con el foco no pasa a `disabled` mientras espera una
+  respuesta,** porque perdería el foco: `aria-disabled` y se ignora el clic.
+- **En pruebas automáticas con Chrome, mirar `document.visibilityState`**
+  antes de diagnosticar un "no responde": con la pestaña oculta, Chrome
+  frena temporizadores y pintado.
 - **Los estilos base de `globals.css` solo tocan elementos sin clases**
   (`:not([class])`). Así las pantallas sin diseño se leen y las diseñadas no
   heredan nada inesperado.
@@ -177,6 +225,18 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 
 ## Pendientes
 
+- [ ] **Después del push de la batalla:** migración que rellene los
+  `bossKey` nulos que haya creado el código viejo (misma regla que
+  `bossForTask()`) y haga la columna `NOT NULL`. Detalles en
+  [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md#pendientes).
+- [ ] Probar la batalla en Vercel (y medir la latencia: desde local cada
+  acción tarda ~3 s), con lector de pantalla, con movimiento reducido real y
+  en Safari y Firefox.
+- [ ] Batalla: al dar el golpe final, la escena se pone gris un instante antes
+  de que llegue la vida nueva.
+- [ ] Tarjeta de jefe a 320 px: la fecha ocupa dos líneas junto a "Atacar"
+  (sin desbordar).
+
 - [ ] **Activar la verificación de correo.** Urgente: la app ya es pública y
   cualquiera puede registrarse con un correo ajeno. Pasos en
   [2026-10-05-auth-better-auth.md](sesiones/2026-10-05-auth-better-auth.md).
@@ -185,8 +245,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   la misma materia dos veces. Hará falta una migración con SQL a mano.
   Detalles en
   [2026-10-06-materias.md](sesiones/2026-10-06-materias.md#pendientes).
-- [ ] **Jefes vencidos:** un jefe `ALIVE` cuya fecha ya pasó sigue saliendo
-  como vivo. Falta decidir cuándo pasa a `FAILED`.
+- [ ] **Jefes vencidos por fecha:** un jefe `ALIVE` cuya fecha ya pasó sigue
+  saliendo como vivo (y se puede combatir). Falta decidir cuándo pasa a
+  `FAILED`.
 - [ ] Probar `/materias` y `/mazmorra/invocar` en producción.
 - [ ] Zona horaria por usuario, si llega a haber usuarios fuera de Colombia
   (hoy es la constante `APP_TIME_ZONE`).
@@ -200,8 +261,6 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] 8 vulnerabilidades altas de `npm audit` (vía `eslint-config-next` y
   `prisma`), anteriores a esta sesión. No usar `audit fix --force`: cambia
   Prisma.
-- [ ] **Al construir la batalla, añadir "Atacar" a las tarjetas de jefe**
-  (`app/mazmorra/boss-card.tsx`) y reutilizar allí `HpBar`.
 - [ ] Probar en producción `/mazmorra`, `/mazmorra/invocar` y `/materias`
   rediseñadas, con un lector de pantalla y en Safari y Firefox.
 - [ ] Quitar de `app/globals.css` las reglas de legibilidad mínima
@@ -219,6 +278,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Batalla: vigilias, golpe, victoria y "Atacar" en las tarjetas de jefe
+  reutilizando `HpBar`~~ (7 oct).
 - [x] ~~Rediseñar `/materias`, `/mazmorra` y `/mazmorra/invocar`~~ (7 oct).
 - [x] ~~Que el formulario de materias conserve lo escrito cuando hay error~~
   (7 oct).
@@ -257,3 +318,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-06 | Video de demostración en el hero (pausa y movimiento reducido) | [2026-10-06-video-hero-landing.md](sesiones/2026-10-06-video-hero-landing.md) |
 | 2026-10-07 | Diseño de `/login` y `/registro`, errores en español y arreglo del 500 | [2026-10-07-diseno-login-registro.md](sesiones/2026-10-07-diseno-login-registro.md) |
 | 2026-10-07 | Diseño de `/mazmorra`, `/mazmorra/invocar` y `/materias` (`AppShell`, barra de vida, consultas de contenedor) | [2026-10-07-diseno-mazmorra-materias.md](sesiones/2026-10-07-diseno-mazmorra-materias.md) |
+| 2026-10-07 | Fase 1: batalla (vigilias, golpe, victoria), migración con índice único parcial, "Atacar" en la mazmorra | [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md) |
