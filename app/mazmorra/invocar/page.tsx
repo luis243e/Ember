@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { BookOpen } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { loadRedemption } from "@/lib/redemption";
 import { todayInAppTimeZone } from "@/lib/dates";
 import { AppShell } from "@/components/app/app-shell";
 import { ButtonLink } from "@/components/ui/button";
@@ -15,20 +16,26 @@ export const metadata: Metadata = {
 };
 
 export default async function InvocarPage() {
-  const user = await requireUser();
+  const sessionUser = await requireUser();
 
   // Solo las materias de este usuario: son las únicas que puede elegir.
-  const subjects = await prisma.subject.findMany({
-    where: { userId: user.id },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
+  // En paralelo con la revisión de jefes vencidos y los avisos: las materias
+  // no dependen de ella.
+  const [{ user, notices }, subjects] = await Promise.all([
+    loadRedemption(sessionUser),
+    prisma.subject.findMany({
+      where: { userId: sessionUser.id },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
 
   return (
     // "Mi mazmorra" queda marcada: invocar es parte de la mazmorra.
     <AppShell
       active="mazmorra"
       user={user}
+      notices={notices}
       title="Invocar nuevo jefe"
       description="Convierte una entrega en un enemigo."
     >

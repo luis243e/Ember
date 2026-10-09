@@ -11,12 +11,15 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `main` se despliega solo.
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
-- **Base de datos:** 7 tablas (`User`, `Subject`, `Task`, `StudySession`,
-  `Session`, `Account`, `Verification`), creadas con 8 migraciones. RLS
-  activado en todas, y también en `_prisma_migrations` (a mano).
-  **Producción y desarrollo usan la misma base de Supabase.** La última
-  (8 oct, ya aplicada en la base compartida) es `20261008214803_llama`, que
-  añade `User.lastStrikeDay` (opcional). Antes, `20261008204127_almas` añadió
+- **Base de datos:** 8 tablas (`User`, `Subject`, `Task`, `StudySession`,
+  `RedemptionMission`, `Session`, `Account`, `Verification`), creadas con 9
+  migraciones. RLS activado en todas, y también en `_prisma_migrations` (a
+  mano). **Producción y desarrollo usan la misma base de Supabase.** La
+  última (8 oct, ya aplicada en la base compartida) es
+  `20261008222051_redencion`: crea `RedemptionMission` (con su RLS y un
+  índice único parcial para una sola misión `ACTIVE` por usuario) y añade
+  `Task.failedAt` (opcional). Antes, `20261008214803_llama` añadió
+  `User.lastStrikeDay` (opcional), `20261008204127_almas` añadió
   `StudySession.soulsEarned` y `Task.victorySouls` (opcionales), y
   `20261008204228_boss_key_obligatorio` hizo `Task.bossKey` obligatoria. La de la batalla
   (`20261007210121_batalla`) creó el índice único parcial que permite una
@@ -54,8 +57,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de almas). La batalla enseña "+N almas", la recompensa de la victoria y
   la subida de nivel. Probado en local; aún no en Vercel. Detalles en
   [2026-10-08-almas-y-niveles.md](sesiones/2026-10-08-almas-y-niveles.md).
-- **La llama (8 oct, solo en local, sin commit; la migración ya está en la
-  base compartida):** racha de días seguidos con al menos un golpe asestado,
+- **La llama (8 oct, en `origin/main` desde el commit `2fe783d`):** racha de días seguidos con al menos un golpe asestado,
   en días de calendario de Colombia. Se guardan `User.flame` y
   `User.lastStrikeDay`, y solo cambian al golpear. Al leer se deduce el
   estado: encendida (golpe hoy), en peligro (ayer) o apagada (antes o nunca,
@@ -63,8 +65,19 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `AppShell` muestran "La llama se ha extinguido…" si se apagó habiendo
   racha. Probado en local; aún no en Vercel. Detalles en
   [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md).
-- **Todavía no existe:** editar o borrar jefes, paso automático de jefes
-  vencidos por fecha a `FAILED`, gastar almas ni la misión de redención.
+- **Jefes vencidos y misión de redención (8 oct, solo en local, sin commit;
+  la migración ya está en la base compartida):** un jefe vivo pasa a
+  `FAILED` cuando termina su día de entrega en hora de Colombia (el día de
+  la entrega todavía se combate). Al caer, se pierden las almas del nivel
+  actual (el nivel no baja) y, si había, empieza una misión: 2 vigilias
+  cumplidas en 48 h las devuelven. Sin tareas programadas: la revisión
+  (`lib/redemption.ts`) se hace al cargar mazmorra, materias, invocar y
+  batalla. La mazmorra enseña la tarjeta de la misión; las páginas con
+  `AppShell`, los avisos de caída, almas recuperadas y almas desvanecidas.
+  Probado en local (también la concurrencia); aún no en Vercel. Detalles en
+  [2026-10-08-redencion.md](sesiones/2026-10-08-redencion.md).
+- **Todavía no existe:** editar o borrar jefes, gastar almas ni una lista de
+  jefes vencidos o caídos.
 - **Diseño (en producción desde la noche del 6 oct):** `/` es la landing
   pública del Figma ("LANDING FINAL"), estática y adaptable a móvil. Hay base
   visual reutilizable: tokens de color en `app/globals.css`, fuentes Inter,
@@ -167,9 +180,10 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Las tiradas al azar (almas) solo se hacen en el servidor, dentro de las
   acciones** (`rollStrikeSouls`, `rollVictorySouls`). Nunca en el cliente.
 - **El nivel se deduce siempre de `User.souls`** con `levelForSouls()`.
-  `User.souls` es el total ganado y no baja. `User.level` se escribe solo en
-  `asestarGolpe`, en la misma transacción que las almas; la pantalla no lo
-  lee.
+  `User.souls` solo baja al caer ante un jefe, y solo hasta el umbral del
+  nivel actual (`fallPenalty()`), así que **el nivel nunca baja**.
+  `User.level` se escribe solo en `asestarGolpe`, en la misma transacción
+  que las almas; la pantalla no lo lee.
 - **`LEVEL_COSTS` es fija: no se regenera.** Se generó una vez el 8 oct
   (cómo, en la nota de esa sesión). Cambiarla movería de nivel a todo el
   mundo.
@@ -182,13 +196,15 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   comenzar; el cliente solo pinta la cuenta atrás a partir de esas marcas y
   de `serverNow`, y nunca calcula la duración (la recibe como prop). Las
   acciones reciben solo el id de la tarea.
-- **En una transacción con bloqueos, todas las acciones bloquean en el mismo
-  orden: tarea → vigilia → usuario,** y cada fila se bloquea antes de
-  escribirla. La tarea y el usuario se leen con `SELECT … FOR UPDATE`
-  (`bloquearTarea` y `bloquearUsuario` en las acciones de la batalla). La
-  vigilia se bloquea con su propio `UPDATE` condicional, que toma el mismo
-  bloqueo de fila y solo cambia una vigilia abierta. Una acción que no
-  necesite alguna de las tres se la salta, pero nunca cambia el orden. Si no,
+- **En una transacción con bloqueos, todo bloquea en el mismo orden: tarea
+  → vigilia → usuario → misión de redención,** y cada fila se bloquea antes
+  de escribirla. La tarea, el usuario y la misión se leen con `SELECT … FOR
+  UPDATE` (`bloquearTarea`, `bloquearUsuario` y `bloquearMision` en las
+  acciones de la batalla). La vigilia se bloquea con su propio `UPDATE`
+  condicional, que toma el mismo bloqueo de fila y solo cambia una vigilia
+  abierta. La revisión de jefes vencidos sigue el mismo orden sin la
+  vigilia: tareas (ordenadas por id) → usuario → misión. Quien no necesite
+  alguna se la salta, pero nunca cambia el orden. Si no,
   dos peticiones simultáneas pueden esperarse la una a la otra para siempre
   (interbloqueo). Con la fila bloqueada se puede leer, calcular en el código
   y escribir sin `increment`: nadie más la cambia hasta el final.
@@ -196,6 +212,30 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   haga falta de la fila bloqueada, se calcula en el código y se escribe una
   sola vez. Cada ida y vuelta a la base alarga el bloqueo (y desde local
   tarda mucho).
+- **La revisión de jefes vencidos es la ÚNICA escritura al cargar una
+  página** (`loadRedemption()` en `lib/redemption.ts`). Es idempotente:
+  ejecutarla dos veces, o en dos pestañas a la vez, castiga una sola vez.
+  Hoy las rutas privadas no se prefetchan (son dinámicas y no hay
+  `loading.js` ni `cacheComponents`); aunque se prefetcharan, no se
+  perdería nada, porque los avisos se deducen de fechas, no de un "ya
+  visto". Va en `page`, nunca en un `layout`.
+- **Lo que se lee en cada carga va en paralelo.** `loadRedemption()` hace
+  sus consultas con `Promise.all`, y cada página la lanza en paralelo con
+  sus propias consultas; si devuelve `revised`, la página vuelve a leer lo
+  suyo. En una carga normal no añade ningún viaje en serie.
+- **En lo que se ejecuta en cada carga, nada de relaciones anidadas de
+  Prisma sin medir:** `include` o `select: { task: { select: … } }` puede
+  ser una consulta aparte, en serie, después de la primera.
+- **Un jefe con una vigilia abierta no cae hasta que se golpee,** aunque su
+  día haya terminado y aunque la vigilia ya haya terminado sin golpe. No
+  sirve para esquivar el castigo: esa vigilia impide empezar cualquier otra
+  y, terminada, ya no se puede abandonar. `comenzarVigilia` rechaza un jefe
+  vencido; `asestarGolpe` no mira la fecha.
+- **La condición de la misión de redención solo vive en `REDEMPTION` y
+  `advanceRedemption()`** (`lib/game.ts`). Cambiará en la fase del agente:
+  no repartirla por el código.
+- **Los avisos de la redención salen 24 h deducidos de fechas**
+  (`resolvedAt` de la misión, `Task.failedAt`), sin escribir nada al leer.
 - **La llama se deduce al leer y solo se escribe al golpear.** `flame` y
   `lastStrikeDay` cambian únicamente en `asestarGolpe`, en la misma escritura
   del usuario que las almas. Las páginas calculan el estado con
@@ -278,14 +318,23 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 
 ## Pendientes
 
-- [ ] **Push de la llama.** La migración `20261008214803_llama` ya está en
-  la base compartida; la columna es opcional, así que el código desplegado
-  sigue funcionando hasta el push.
+- [ ] **Push de la redención.** La migración `20261008222051_redencion` ya
+  está en la base compartida; la tabla es nueva y `failedAt` es opcional,
+  así que el código desplegado sigue funcionando hasta el push.
+- [ ] Probar la redención en Vercel (medir la carga de `/mazmorra`: hace 4
+  consultas en paralelo), con lector de pantalla y en Safari y Firefox.
+- [ ] Golpe a un jefe vencido que no muere (vigilia que cruzó la
+  medianoche): tras el golpe, la batalla redirige a la mazmorra y no se ve
+  el "+N almas". Decidir si mostrar antes el resultado.
+- [ ] La mazmorra vacía dice "Todavía no has invocado ningún jefe" aunque
+  haya jefes vencidos o caídos.
+- [ ] Cuando se puedan borrar jefes: `RedemptionMission.taskId` es
+  `ON DELETE CASCADE` y borraría la misión con el jefe.
+- [ ] Prisma con `pgbouncer=true` añade `BEGIN`, `DEALLOCATE ALL` y `COMMIT`
+  a cada consulta. Si la latencia molesta en Vercel, mirar ahí.
 - [ ] Probar la llama en Vercel, con lector de pantalla y en Safari y
   Firefox. No se ha probado un golpe real después de las 7 p. m. de Colombia
   (el cambio de día lo cubren las pruebas de las funciones puras).
-- [ ] **Misión de redención** (siguiente paso): la tarjeta de los marcos
-  99:2 y 99:165 y los avisos de almas recuperadas o perdidas de 99:313.
 - [ ] Probar almas, niveles y el bloque del personaje en Vercel, con lector
   de pantalla, con movimiento reducido real y en Safari y Firefox.
 - [ ] Cuando llegue el inicio de sesión con Google, comprobar el avatar con
@@ -306,9 +355,6 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   la misma materia dos veces. Hará falta una migración con SQL a mano.
   Detalles en
   [2026-10-06-materias.md](sesiones/2026-10-06-materias.md#pendientes).
-- [ ] **Jefes vencidos por fecha:** un jefe `ALIVE` cuya fecha ya pasó sigue
-  saliendo como vivo (y se puede combatir). Falta decidir cuándo pasa a
-  `FAILED`.
 - [ ] Probar `/materias` y `/mazmorra/invocar` en producción.
 - [ ] Zona horaria por usuario, si llega a haber usuarios fuera de Colombia
   (hoy es la constante `APP_TIME_ZONE`).
@@ -339,6 +385,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base se recrea, volver a activar a mano el RLS de
   `_prisma_migrations`.
+- [x] ~~Jefes vencidos por fecha a `FAILED` y misión de redención (tarjeta
+  y avisos)~~ (8 oct).
+- [x] ~~Push de la llama~~ (commit `2fe783d`).
 - [x] ~~La llama: racha diaria, tres estados y aviso de llama extinguida~~
   (8 oct).
 - [x] ~~Push de almas y niveles~~ (commit `d1fc1e1`).
@@ -389,3 +438,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-07 | Fase 1: batalla (vigilias, golpe, victoria), migración con índice único parcial, "Atacar" en la mazmorra | [2026-10-07-batalla.md](sesiones/2026-10-07-batalla.md) |
 | 2026-10-08 | Fase 1: almas y niveles (tabla fija de 49 costes, bloque del personaje, recompensas en la batalla), `bossKey` obligatoria | [2026-10-08-almas-y-niveles.md](sesiones/2026-10-08-almas-y-niveles.md) |
 | 2026-10-08 | Fase 1: la llama (racha diaria en hora de Colombia, tres estados, aviso de llama extinguida, `bloquearUsuario`) | [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md) |
+| 2026-10-08 | Fase 1: jefes vencidos y misión de redención (revisión al cargar, castigo una sola vez, `RedemptionMission` con índice único parcial, tarjeta y avisos) | [2026-10-08-redencion.md](sesiones/2026-10-08-redencion.md) |

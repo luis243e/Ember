@@ -201,6 +201,59 @@ export function flameAfterStrike(
 }
 
 // ---------------------------------------------------------------------------
+//  Caída y misión de redención
+// ---------------------------------------------------------------------------
+
+// Un jefe vivo cae (pasa a FAILED) cuando termina su día de entrega en hora de
+// Colombia: con dueDate < hoy. El día de la entrega todavía se combate. Al
+// caer uno o más jefes a la vez, se pierden las almas que se llevaban dentro
+// del nivel actual (una sola vez) y empieza una misión para recuperarlas.
+
+// Lo que hace falta para cumplir la misión y el plazo para hacerlo, contado
+// desde la caída. ESTOS NÚMEROS Y advanceRedemption() SON LO ÚNICO QUE HAY
+// QUE CAMBIAR cuando la condición sea otra (fase del agente: preguntas).
+export const REDEMPTION = { vigilsRequired: 2, hours: 48 } as const;
+
+// Horas que siguen saliendo los avisos al entrar ("Has recuperado tus almas",
+// "Tus almas se han desvanecido", "Has caído ante…") después de que pase lo
+// que cuentan. Se deducen de las fechas guardadas: leer no escribe nada.
+export const REDEMPTION_NOTICE_HOURS = 24;
+
+const HOUR_MS = 60 * 60 * 1000;
+
+// Lo que cuesta caer: las almas ganadas dentro del nivel actual. El total
+// baja justo hasta el umbral del nivel, así que el nivel NUNCA baja (en el 50
+// se pierden las que pasan del umbral del 50).
+export function fallPenalty(souls: number): { lost: number; soulsAfter: number } {
+  const { soulsIntoLevel } = levelForSouls(souls);
+  return { lost: soulsIntoLevel, soulsAfter: souls - soulsIntoLevel };
+}
+
+// Fecha límite de una misión que empieza en fellAt.
+export function redemptionDeadline(fellAt: Date): Date {
+  return new Date(fellAt.getTime() + REDEMPTION.hours * HOUR_MS);
+}
+
+// LA regla de cómo avanza la misión con cada golpe aceptado (una vigilia
+// cumplida contra cualquier jefe). null = el golpe no cuenta porque el plazo
+// ya pasó (la revisión la marcará EXPIRED). completed = con este golpe se
+// cumple y las almas vuelven.
+export function advanceRedemption(
+  mission: { vigilsDone: number; deadline: Date },
+  now: Date,
+): { vigilsDone: number; completed: boolean } | null {
+  if (now.getTime() >= mission.deadline.getTime()) return null;
+  const vigilsDone = mission.vigilsDone + 1;
+  return { vigilsDone, completed: vigilsDone >= REDEMPTION.vigilsRequired };
+}
+
+// Horas que le quedan a la misión, hacia arriba: con 20 minutos dice 1 h,
+// nunca "0 h" mientras siga en plazo.
+export function redemptionHoursLeft(deadline: Date, now: Date): number {
+  return Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / HOUR_MS));
+}
+
+// ---------------------------------------------------------------------------
 //  Bestiario
 // ---------------------------------------------------------------------------
 

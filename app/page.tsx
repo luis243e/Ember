@@ -93,7 +93,7 @@ const FEATURES: {
     title: "Misión de redención",
     description:
       "¿Un jefe te venció? Siempre hay una forma de recuperarte. El juego no te abandona cuando fallas.",
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     icon: BookOpen,

@@ -54,6 +54,14 @@ enum TaskStatus {
   FAILED    // pasó la fecha de entrega sin terminarla: el jefe te derrotó
 }
 
+// Estado de una misión de redención (reglas en lib/game.ts y lib/redemption.ts).
+enum RedemptionStatus {
+  ACTIVE     // en curso: las almas esperan donde caíste
+  COMPLETED  // cumplida a tiempo: las almas volvieron
+  EXPIRED    // se agotó el plazo: las almas se perdieron
+  LOST       // volviste a caer antes de cumplirla: las almas se perdieron
+}
+
 
 // -----------------------------------------------------------------------------
 //  MODELOS: cada "model" se convierte en una TABLA de Postgres.
@@ -124,6 +132,10 @@ model User {
 
   // Vigilias (sesiones de estudio) del usuario, de todos sus jefes.
   studySessions StudySession[]
+
+  // Misiones de redención del usuario: la activa (como mucho una) y las ya
+  // resueltas, que se guardan para los avisos y como historial.
+  redemptionMissions RedemptionMission[]
 }
 
 
@@ -285,8 +297,16 @@ model Task {
   // antes de que existieran las almas (no hay almas retroactivas).
   victorySouls Int?
 
+  // Cuándo pasó a FAILED: el momento en que la revisión de jefes vencidos
+  // (lib/redemption.ts) registró la caída, no la medianoche de la entrega.
+  // null = no ha caído (o cayó antes de que existiera esta columna).
+  failedAt    DateTime?
+
   // Una tarea tiene MUCHAS sesiones de estudio.
   sessions    StudySession[]
+
+  // Misiones de redención que provocó la caída de este jefe.
+  redemptionMissions RedemptionMission[]
 
   // Índice para buscar rápido las tareas de una materia.
   @@index([subjectId])
@@ -331,4 +351,46 @@ model StudySession {
   @@index([taskId])
   // Y las de un usuario (lo usa también el borrado en cascada del usuario).
   @@index([userId])
+}
+
+
+// ========== MISIÓN DE REDENCIÓN ==========
+// Al caer ante uno o más jefes, el usuario pierde las almas que llevaba dentro
+// de su nivel, y esas almas quedan "en juego" en una misión: si la cumple a
+// tiempo, vuelven. Una sola ACTIVE por usuario, garantizado por un índice
+// único parcial (ver la migración 20261008222051_redencion; Prisma no sabe
+// escribirlo en este archivo).
+model RedemptionMission {
+  id           String           @id @default(cuid())
+
+  // Dueño de la misión.
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // El jefe que la provocó. Si cayeron varios a la vez, el primero por
+  // fecha de entrega y nombre (los demás tienen el mismo Task.failedAt).
+  taskId       String
+  task         Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  // Almas que se perdieron al caer y que vuelven si se cumple la misión.
+  soulsAtStake Int
+
+  // Vigilias cumplidas desde la caída. Las cuenta advanceRedemption().
+  vigilsDone   Int              @default(0)
+
+  status       RedemptionStatus @default(ACTIVE)
+
+  // Momento de la caída: el mismo instante que Task.failedAt de los jefes
+  // que cayeron en esa revisión.
+  fellAt       DateTime
+
+  // Hasta cuándo se puede cumplir: fellAt + REDEMPTION.hours.
+  deadline     DateTime
+
+  // Cuándo dejó de estar ACTIVE. Los avisos de "almas recuperadas" y "almas
+  // desvanecidas" salen durante las 24 h siguientes a esta fecha.
+  resolvedAt   DateTime?
+
+  @@index([userId])
+  @@index([taskId])
 }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { BookOpen } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { loadRedemption } from "@/lib/redemption";
 import { AppShell } from "@/components/app/app-shell";
 import { cardStyles } from "@/components/ui/card";
 import { Eyebrow } from "@/components/ui/eyebrow";
@@ -13,19 +14,25 @@ export const metadata: Metadata = {
 };
 
 export default async function MateriasPage() {
-  const user = await requireUser();
+  const sessionUser = await requireUser();
 
   // Solo las materias de este usuario, ordenadas por nombre.
-  const subjects = await prisma.subject.findMany({
-    where: { userId: user.id },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
+  // En paralelo con la revisión de jefes vencidos y los avisos: las materias
+  // no dependen de ella.
+  const [{ user, notices }, subjects] = await Promise.all([
+    loadRedemption(sessionUser),
+    prisma.subject.findMany({
+      where: { userId: sessionUser.id },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
 
   return (
     <AppShell
       active="materias"
       user={user}
+      notices={notices}
       title="Mis materias"
       description="Cada jefe pertenece a una materia."
     >

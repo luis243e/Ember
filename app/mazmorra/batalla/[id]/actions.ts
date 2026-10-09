@@ -5,8 +5,9 @@ import { refresh } from "next/cache";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
-import { todayInAppTimeZone } from "@/lib/dates";
+import { todayDateInAppTimeZone, todayInAppTimeZone } from "@/lib/dates";
 import {
+  advanceRedemption,
   flameAfterStrike,
   HP_PER_BLOCK,
   levelForSouls,
@@ -19,7 +20,9 @@ import { formatCountdown } from "./countdown";
 // Lo que devuelven las tres acciones. Si ok es false, error lleva el mensaje
 // que verá el usuario. Los campos opcionales solo los da asestarGolpe:
 // strikeSouls son las almas del golpe, victorySouls las de la victoria (solo
-// si el jefe cayó) y newLevel el nivel alcanzado (solo si se subió).
+// si el jefe cayó), recoveredSouls las que vuelven al cumplir la misión de
+// redención (solo si este golpe la cumplió) y newLevel el nivel alcanzado
+// (solo si se subió).
 export type ResultadoBatalla =
   | {
       ok: true;
@@ -27,6 +30,7 @@ export type ResultadoBatalla =
       defeated?: boolean;
       strikeSouls?: number;
       victorySouls?: number;
+      recoveredSouls?: number;
       newLevel?: number;
     }
   | { ok: false; error: string };
@@ -48,22 +52,24 @@ async function tareaPropia(taskId: unknown, userId: string) {
 
 // Bloquea la fila de la tarea hasta el final de la transacción y devuelve lo
 // que hace falta de ella. Comenzar y golpear empiezan SIEMPRE por aquí, y en
-// el mismo orden (primero la tarea, después la vigilia y, al golpear, por
-// último el usuario), para que dos peticiones simultáneas se pongan en fila
-// en vez de bloquearse la una a la otra.
+// el mismo orden (primero la tarea, después la vigilia y, al golpear, el
+// usuario y por último la misión de redención), para que dos peticiones
+// simultáneas se pongan en fila en vez de bloquearse la una a la otra. La
+// revisión de jefes vencidos (lib/redemption.ts) sigue el mismo orden.
 // $queryRaw con plantilla: el id viaja como parámetro, nunca pegado al SQL.
 async function bloquearTarea(tx: Prisma.TransactionClient, taskId: string) {
   const rows = await tx.$queryRaw<
-    { status: TaskStatus; currentHp: number; difficulty: Difficulty }[]
+    { status: TaskStatus; currentHp: number; difficulty: Difficulty; dueDate: Date }[]
   >`
-    SELECT "status", "currentHp", "difficulty" FROM "Task"
+    SELECT "status", "currentHp", "difficulty", "dueDate" FROM "Task"
     WHERE "id" = ${taskId} FOR UPDATE`;
   return rows[0];
 }
 
 // Lo mismo con la fila del usuario: la bloquea hasta el final de la
 // transacción y devuelve lo que hace falta para calcular almas, nivel y
-// llama. Va SIEMPRE la última (tarea → vigilia → usuario). Con la fila
+// llama. Va después de la tarea y la vigilia, y antes de la misión
+// (tarea → vigilia → usuario → misión). Con la fila
 // bloqueada nadie más puede cambiar esos valores, así que se calculan en el
 // código y se escriben de una vez.
 async function bloquearUsuario(tx: Prisma.TransactionClient, userId: string) {
@@ -72,6 +78,18 @@ async function bloquearUsuario(tx: Prisma.TransactionClient, userId: string) {
   >`
     SELECT "souls", "level", "flame", "lastStrikeDay" FROM "User"
     WHERE "id" = ${userId} FOR UPDATE`;
+  return rows[0];
+}
+
+// La misión de redención activa del usuario, bloqueada, o undefined si no
+// tiene. Va SIEMPRE la última, después del usuario: la revisión de jefes
+// vencidos la crea y la resuelve con el usuario ya bloqueado.
+async function bloquearMision(tx: Prisma.TransactionClient, userId: string) {
+  const rows = await tx.$queryRaw<
+    { id: string; vigilsDone: number; deadline: Date; soulsAtStake: number }[]
+  >`
+    SELECT "id", "vigilsDone", "deadline", "soulsAtStake" FROM "RedemptionMission"
+    WHERE "userId" = ${userId} AND "status" = 'ACTIVE' FOR UPDATE`;
   return rows[0];
 }
 
@@ -91,6 +109,12 @@ export async function comenzarVigilia(taskId: string): Promise<ResultadoBatalla>
       // a que termine y vemos que ya no está vivo.
       const locked = await bloquearTarea(tx, task.id);
       if (locked?.status !== "ALIVE") return fallo("Este jefe ya ha caído.");
+      // Su día de entrega ya terminó: el jefe te ha vencido, aunque la
+      // revisión todavía no lo haya marcado (lo hará al volver a pintar).
+      // Con la tarea bloqueada, la revisión no puede colarse en medio.
+      if (locked.dueDate < todayDateInAppTimeZone(now)) {
+        return fallo("Este jefe ya te ha vencido: su fecha de entrega pasó.");
+      }
 
       await tx.studySession.create({
         data: {
@@ -152,9 +176,12 @@ export async function asestarGolpe(taskId: string): Promise<ResultadoBatalla> {
   const now = new Date();
 
   const resultado = await prisma.$transaction(async (tx): Promise<ResultadoBatalla> => {
-    // 1. Primero la tarea (mismo orden que comenzarVigilia). Del mismo
-    // SELECT ... FOR UPDATE sale la vida: con la fila bloqueada nadie puede
-    // cambiarla hasta el final, así que se calcula aquí sin volver a leerla.
+    // 1. Primero la tarea (mismo orden que comenzarVigilia). NO se mira la
+    // fecha de entrega: una vigilia que empezó a tiempo y cruzó la medianoche
+    // se puede golpear (la revisión no marca un jefe con vigilia abierta).
+    // Del mismo SELECT ... FOR UPDATE sale la vida: con la fila bloqueada
+    // nadie puede cambiarla hasta el final, así que se calcula aquí sin
+    // volver a leerla.
     const locked = await bloquearTarea(tx, task.id);
     if (locked?.status !== "ALIVE") return fallo("Este jefe ya ha caído.");
 
@@ -195,13 +222,29 @@ export async function asestarGolpe(taskId: string): Promise<ResultadoBatalla> {
       data: defeated ? { currentHp, status: "DEFEATED", victorySouls } : { currentHp },
     });
 
-    // 4. Por último el usuario: se bloquea su fila, se calcula todo en el
-    // código y se escribe UNA vez. Almas: el total nuevo. Nivel: se deduce
-    // del total y se escribe solo si cambia (es el ÚNICO sitio que escribe
-    // User.level). Llama: con el día de hoy en hora de Colombia, el mismo
-    // "hoy" que las fechas de entrega.
+    // 4. El usuario y 5. su misión de redención, bloqueados en ese orden. Se
+    // calcula todo en el código y el usuario se escribe UNA vez. Almas: el
+    // total nuevo, con las de la misión si este golpe la cumple. Nivel: se
+    // deduce del total y se escribe solo si cambia (es el ÚNICO sitio que
+    // escribe User.level). Llama: con el día de hoy en hora de Colombia, el
+    // mismo "hoy" que las fechas de entrega.
     const owner = await bloquearUsuario(tx, user.id);
-    const gained = strikeSouls + (victorySouls ?? 0);
+    const mission = await bloquearMision(tx, user.id);
+    // Cómo avanza la misión lo decide SOLO advanceRedemption (lib/game.ts).
+    // null = no hay misión o su plazo ya pasó (la revisión la marcará).
+    const advance = mission ? advanceRedemption(mission, now) : null;
+    let recoveredSouls = 0;
+    if (mission && advance) {
+      if (advance.completed) recoveredSouls = mission.soulsAtStake;
+      await tx.redemptionMission.update({
+        where: { id: mission.id },
+        data: advance.completed
+          ? { vigilsDone: advance.vigilsDone, status: "COMPLETED", resolvedAt: now }
+          : { vigilsDone: advance.vigilsDone },
+      });
+    }
+
+    const gained = strikeSouls + (victorySouls ?? 0) + recoveredSouls;
     const souls = owner.souls + gained;
     const level = levelForSouls(souls).level;
     const flame = flameAfterStrike(owner.flame, owner.lastStrikeDay, todayInAppTimeZone(now));
@@ -224,9 +267,13 @@ export async function asestarGolpe(taskId: string): Promise<ResultadoBatalla> {
       defeated,
       strikeSouls,
       victorySouls,
+      recoveredSouls: recoveredSouls > 0 ? recoveredSouls : undefined,
       newLevel: leveledUp ? level : undefined,
     };
-  });
+    // timeout: con la misión son hasta nueve viajes a la base (~250 ms cada
+    // uno desde local), más la espera si la revisión de jefes vencidos tiene
+    // al usuario bloqueado. Los 5 s por defecto se quedarían cortos.
+  }, { timeout: 15_000 });
 
   refresh();
   return resultado;

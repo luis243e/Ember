@@ -87,6 +87,9 @@ export function Batalla({
   // Nivel alcanzado con el último golpe. Solo vive aquí, en el momento: al
   // recargar o con la siguiente acción desaparece.
   const [newLevel, setNewLevel] = useState<number | null>(null);
+  // Almas devueltas por la misión de redención, si el último golpe la
+  // cumplió. Como el nivel, solo vive aquí y en el momento.
+  const [recoveredSouls, setRecoveredSouls] = useState<number | null>(null);
   const [hitting, setHitting] = useState(false);
   const [justDefeated, setJustDefeated] = useState(false);
   const paused = useSyncExternalStore(subscribePause, readPause, () => false);
@@ -156,6 +159,7 @@ export function Batalla({
   ) {
     setError(null);
     setNewLevel(null);
+    setRecoveredSouls(null);
     startTransition(async () => {
       const result = await action(task.id);
       setConfirming(false);
@@ -180,7 +184,12 @@ export function Batalla({
         setStrikeSouls(souls);
         setHitting(true);
         setNewLevel(result.newLevel ?? null);
-        const levelText = result.newLevel ? ` Has alcanzado el nivel ${result.newLevel}.` : "";
+        setRecoveredSouls(result.recoveredSouls ?? null);
+        // Lo recuperado va antes que el nivel: es lo que lo hace subir.
+        const levelText =
+          (result.recoveredSouls
+            ? ` Misión de redención cumplida: recuperas ${formatNumber(result.recoveredSouls)} almas.`
+            : "") + (result.newLevel ? ` Has alcanzado el nivel ${result.newLevel}.` : "");
         if (result.defeated) {
           setJustDefeated(true);
           setAnnouncement(
@@ -453,7 +462,7 @@ export function Batalla({
               <p className="text-[15px] leading-normal wrap-anywhere text-ash @2xl:text-[17px]">
                 {victorySentence(task.name, summary)}
               </p>
-              {(reward || newLevel) && (
+              {(reward || newLevel || recoveredSouls !== null) && (
                 <div className="flex flex-col items-center gap-1.5 leading-[normal]">
                   {/* En una línea con el punto en medio desde @md (28rem); en
                       pantallas más estrechas no cabe, y cada parte va en su
@@ -471,6 +480,7 @@ export function Batalla({
                       </span>
                     </p>
                   )}
+                  {recoveredSouls !== null && <Recovered souls={recoveredSouls} />}
                   {newLevel && <LevelUp level={newLevel} />}
                 </div>
               )}
@@ -488,6 +498,7 @@ export function Batalla({
             {/* Si el golpe fue el final, el nivel sale en la victoria: aquí
                 no, ni en el instante en que llega la respuesta y la página
                 aún no se ha repintado. */}
+            {recoveredSouls !== null && !justDefeated && <Recovered souls={recoveredSouls} />}
             {newLevel && !justDefeated && <LevelUp level={newLevel} />}
             {otherVigil && phase === "idle" && (
               <p className="text-center text-[13px] leading-normal text-ash">
@@ -516,6 +527,17 @@ export function Batalla({
         {announcement}
       </p>
     </div>
+  );
+}
+
+// "+340 almas recuperadas": el golpe cumplió la misión de redención. Junto a
+// las demás recompensas: en la victoria o, con un golpe normal, debajo de la
+// escena.
+function Recovered({ souls }: { souls: number }) {
+  return (
+    <p className="text-center text-[15px] leading-[normal] font-semibold text-gold-bright @2xl:text-[17px]">
+      +{formatNumber(souls)} {souls === 1 ? "alma recuperada" : "almas recuperadas"}
+    </p>
   );
 }
 

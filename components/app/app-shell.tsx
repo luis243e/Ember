@@ -4,10 +4,12 @@ import type { ReactNode } from "react";
 import { cerrarSesion } from "@/app/mazmorra/actions";
 import { CharacterCard, type CharacterUser } from "@/components/app/character-card";
 import { ExtinguishedFlameNotice } from "@/components/app/flame-notice";
+import { RedemptionNotice } from "@/components/app/redemption-notice";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { todayInAppTimeZone } from "@/lib/dates";
 import { flameState } from "@/lib/game";
+import type { RedemptionNotice as RedemptionNoticeData } from "@/lib/redemption";
 
 type AppSection = "mazmorra" | "materias";
 
@@ -30,6 +32,8 @@ type AppShellProps = {
   // Cabecera de la página: título (h1) y subtítulo.
   title: string;
   description: string;
+  // Avisos de la caída y de la misión de redención, de loadRedemption().
+  notices: RedemptionNoticeData[];
   children: ReactNode;
 };
 
@@ -38,7 +42,14 @@ type AppShellProps = {
 // móvil. NO comprueba la sesión: cada página llama antes a requireUser() y le
 // pasa el usuario. El bloque del personaje ("ALMAS Y NIVELES") va bajo el
 // logo en la barra lateral y bajo las pestañas en móvil.
-export function AppShell({ active, user, title, description, children }: AppShellProps) {
+export function AppShell({
+  active,
+  user,
+  title,
+  description,
+  notices,
+  children,
+}: AppShellProps) {
   // La llama se calcula una vez al pintar, con el "hoy" de Colombia, y no se
   // escribe nada en la base: la racha guardada solo cambia al golpear.
   const flame = flameState(user.flame, user.lastStrikeDay ?? null, todayInAppTimeZone());
@@ -149,9 +160,17 @@ export function AppShell({ active, user, title, description, children }: AppShel
           <p className="text-sm leading-[normal] text-smoke">{description}</p>
         </div>
         <div className="px-4 pt-6 pb-8 md:px-8 md:py-10 lg:px-12">
-          {/* Aviso al entrar: justo debajo de la cabecera, antes del
-              contenido de la página. */}
-          {flame.extinguished && <ExtinguishedFlameNotice />}
+          {/* Avisos al entrar: justo debajo de la cabecera, antes del
+              contenido de la página. Primero lo que se perdió o se ganó en la
+              mazmorra, y al final la llama. */}
+          {(notices.length > 0 || flame.extinguished) && (
+            <div className="mb-6 flex flex-col gap-3">
+              {notices.map((notice) => (
+                <RedemptionNotice key={notice.kind} notice={notice} />
+              ))}
+              {flame.extinguished && <ExtinguishedFlameNotice />}
+            </div>
+          )}
           {children}
         </div>
       </main>

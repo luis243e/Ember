@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { loadRedemption } from "@/lib/redemption";
 import { bossForTask, bossImageSrc, DIFFICULTY_LABELS, vigilDurationMs } from "@/lib/game";
 import { Batalla } from "./batalla";
 
-// La tarea, solo si es del usuario. cache(): generateMetadata y la página la
-// piden en la misma petición y así la base se consulta una vez.
-const getTask = cache(async (id: string, userId: string) =>
+// La tarea, solo si es del usuario.
+const findTask = (id: string, userId: string) =>
   prisma.task.findFirst({
     // Task no tiene userId: se filtra a través de la materia.
     where: { id, subject: { userId } },
@@ -23,8 +23,12 @@ const getTask = cache(async (id: string, userId: string) =>
       victorySouls: true,
       subject: { select: { name: true } },
     },
-  }),
-);
+  });
+
+// cache(): generateMetadata y la página la piden en la misma petición y así la
+// base se consulta una vez. Después de una revisión que cambió algo, la
+// página usa findTask directamente: cache() le daría la lectura de antes.
+const getTask = cache(findTask);
 
 export async function generateMetadata({
   params,
@@ -106,9 +110,19 @@ export default async function BatallaPage({ params }: PageProps<"/mazmorra/batal
   const user = await requireUser();
   const { id } = await params;
 
+  // La revisión de jefes vencidos y el jefe, en paralelo. Si la revisión
+  // marcó algo, el jefe se vuelve a leer: puede que acabe de caer.
+  const [{ revised }, firstRead] = await Promise.all([
+    loadRedemption(user),
+    getTask(id, user.id),
+  ]);
+  const task = revised ? await findTask(id, user.id) : firstRead;
+
   // Si no existe o es de otro usuario: 404, sin distinguir los dos casos.
-  const task = await getTask(id, user.id);
   if (!task) notFound();
+  // Un jefe que te venció no se combate: a la mazmorra, donde están la
+  // misión de redención o el aviso de la caída.
+  if (task.status === "FAILED") redirect("/mazmorra");
 
   const props = await loadBattle(task, user.id);
   return <Batalla {...props} />;

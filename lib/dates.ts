@@ -51,6 +51,18 @@ export function parseDateInput(value: string): Date | null {
   return date;
 }
 
+// Hoy en APP_TIME_ZONE como Date a las 00:00 UTC, la misma convención con la
+// que se guardan las fechas de entrega: así se comparan directamente. Un jefe
+// está vencido si su dueDate es ANTERIOR a esto (el día de la entrega todavía
+// no lo está).
+export function todayDateInAppTimeZone(now: Date = new Date()): Date {
+  const today = todayInAppTimeZone(now);
+  const date = parseDateInput(today);
+  // todayInAppTimeZone siempre da "AAAA-MM-DD": si no, es un error de programación.
+  if (!date) throw new Error(`Día no válido: ${today}`);
+  return date;
+}
+
 // "20 de octubre de 2026". En UTC, porque así se guardó (ver arriba).
 const dueDateFormatter = new Intl.DateTimeFormat("es-CO", {
   timeZone: "UTC",
