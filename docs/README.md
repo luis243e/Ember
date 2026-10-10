@@ -13,9 +13,17 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
 - **Base de datos:** 8 tablas (`User`, `Subject`, `Task`, `StudySession`,
   `RedemptionMission`, `Session`, `Account`, `Verification`), creadas con 9
-  migraciones. RLS activado en todas, y también en `_prisma_migrations` (a
-  mano). **Producción y desarrollo usan la misma base de Supabase.** La
-  última (8 oct, ya aplicada en la base compartida) es
+  migraciones. RLS activado en todas, y en producción también en
+  `_prisma_migrations` (a mano).
+- **Desarrollo y producción separadas (10 oct, sin commit):** desarrollo usa
+  un Postgres 17 en Docker en cada equipo (`docker-compose.yml`, puerto 5433),
+  que se puede borrar y recrear, con datos de prueba (`npm run db:seed`).
+  Producción sigue en Supabase (Postgres 17) y **solo recibe migraciones desde
+  el build de producción de Vercel** (`vercel.json` →
+  `scripts/vercel-build.mjs`). Los `.env` de los equipos ya no tienen valores
+  de producción. Detalles en
+  [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
+- **Migraciones:** la última (8 oct, ya aplicada en producción) es
   `20261008222051_redencion`: crea `RedemptionMission` (con su RLS y un
   índice único parcial para una sola misión `ACTIVE` por usuario) y añade
   `Task.failedAt` (opcional). Antes, `20261008214803_llama` añadió
@@ -65,8 +73,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `AppShell` muestran "La llama se ha extinguido…" si se apagó habiendo
   racha. Probado en local; aún no en Vercel. Detalles en
   [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md).
-- **Jefes vencidos y misión de redención (8 oct, solo en local, sin commit;
-  la migración ya está en la base compartida):** un jefe vivo pasa a
+- **Jefes vencidos y misión de redención (8 oct, en `origin/main` desde el
+  commit `df0d0c4`):** un jefe vivo pasa a
   `FAILED` cuando termina su día de entrega en hora de Colombia (el día de
   la entrega todavía se combate). Al caer, se pierden las almas del nivel
   actual (el nivel no baja) y, si había, empieza una misión: 2 vigilias
@@ -106,20 +114,42 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 
 ## Cómo arrancar en un equipo nuevo
 
-1. `git clone` (o `git pull` si ya está clonado).
-2. `npm install`. El script `postinstall` ejecuta `prisma generate` solo.
-3. Crear un `.env` en la raíz con estas variables (los valores no están en el
-   repositorio):
+> **⚠️ Si este equipo ya tenía un `.env` de antes del 10 oct, apunta a
+> PRODUCCIÓN.** Cámbialo (paso 4) **ANTES de ejecutar cualquier comando de
+> Prisma** (`migrate`, `db`, `studio`, el seed...) o `npm run dev`: con el
+> `.env` viejo, `migrate dev` cambiaría la base de producción. Para saber si
+> es el viejo sin mostrar ninguna contraseña: `grep -c supabase .env` tiene
+> que dar `0`.
 
-   | Variable | De dónde sale |
+1. Instalar [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+   y abrirlo (el motor tiene que estar en marcha: `docker info` responde).
+2. `git clone` (o `git pull` si ya está clonado).
+3. `npm install`. El script `postinstall` ejecuta `prisma generate` solo.
+4. Crear el `.env` de desarrollo a partir de la plantilla:
+   `cp .env.example .env` (o reemplazar el viejo). Rellenar solo
+   `BETTER_AUTH_SECRET` con `openssl rand -base64 32` (distinto al de
+   producción). El resto ya trae los valores de desarrollo:
+
+   | Variable | Para qué |
    |---|---|
-   | `DATABASE_URL` | Supabase → *Connect* → Transaction pooler (puerto 6543), terminada en `?pgbouncer=true` |
-   | `DIRECT_URL` | Supabase → *Connect* → conexión directa (puerto 5432) |
-   | `BETTER_AUTH_SECRET` | `openssl rand -base64 32` (distinto al de producción) |
+   | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Usuario, contraseña y base que crea el contenedor (de desarrollo, no son secretos) |
+   | `DATABASE_URL`, `DIRECT_URL` | Las dos a `postgresql://…@localhost:5433/ember` |
+   | `BETTER_AUTH_SECRET` | Firma las cookies de sesión |
    | `BETTER_AUTH_URL` | `http://localhost:3000` |
+   | `EMBER_TEST_VIGIL_SECONDS` | Opcional: vigilias de N segundos para probar (solo en `next dev`) |
 
-4. `npx prisma migrate status` para comprobar que la base está al día.
-5. `npm run dev` y abrir http://localhost:3000/registro.
+5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
+   equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
+   descarga la imagen. `docker compose ps` debe decir `healthy`.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 9 migraciones.
+7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
+   `prueba1234`** (de desarrollo, no protege nada real) con 2 materias, 5
+   jefes en varios estados, almas y llama. Se puede repetir: rehace la cuenta.
+8. `npm run dev` y abrir http://localhost:3000/login.
+
+Para empezar de cero: `docker compose down -v` (borra el volumen con los
+datos), `docker compose up -d`, `npx prisma migrate deploy` y
+`npm run db:seed`.
 
 ## Reglas del proyecto
 
@@ -132,29 +162,60 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `schema.prisma`, porque su CLI renombraría `User` a `user`.
 - **Nunca editar una migración ya aplicada.** Se cambia el schema y se crea
   una migración nueva.
-- **Revisar el SQL antes de aplicarlo:** `migrate dev --create-only` una sola
-  vez, leer el archivo y después **`migrate deploy`** + `prisma generate` (con
-  el servidor de desarrollo parado). `deploy` solo aplica lo pendiente y nunca
-  propone reiniciar la base, que es también la de producción. Antes de
-  aplicar, comprobar que `migrate status` solo muestra esa migración. Si algún
-  comando ofrece un reset o habla de drift, parar. Si una migración falla a
-  medias, no arreglar nada a mano sobre la base.
+- **Desarrollo y producción son bases separadas.** El `.env` de cada equipo
+  apunta solo al Postgres de Docker (`localhost:5433`). Los valores de
+  producción solo los tiene Vercel (y se consultan en Supabase → *Connect*):
+  nunca van a un `.env`, a otro archivo ni a `docs/`.
+- **Las migraciones se crean y se prueban solo en local, con `migrate dev`:**
+  `npx prisma migrate dev --create-only --name <nombre>`, leer el SQL (y
+  añadir a mano lo que Prisma no sabe escribir), y después
+  `npx prisma migrate dev`, que la aplica y regenera el cliente (con el
+  servidor de desarrollo parado). Si en local ofrece un reset por *drift*, se
+  puede aceptar (son datos de prueba; después `npm run db:seed`), pero antes
+  hay que entender de dónde viene: suele ser una migración editada.
+- **A producción solo llegan por el build de Vercel.** En el build de
+  producción (`VERCEL_ENV=production`), `scripts/vercel-build.mjs` ejecuta
+  `prisma migrate deploy` (con `DIRECT_URL`, el session pooler en el puerto
+  5432) y después `next build`. Las vistas previas nunca migran. Nunca se
+  ejecuta `migrate` contra producción desde un equipo, y `npm run build` en
+  local es solo `next build`.
+- **Si la migración falla en el build, el build falla** y el despliegue
+  anterior sigue sirviendo (código viejo con la base sin la migración, que es
+  coherente). Mirar el log del build en Vercel:
+  - Error de conexión (`P1001`): comprobar `DIRECT_URL` en Vercel y hacer
+    *Redeploy*.
+  - Error del SQL (`P3018`): Prisma deja la migración marcada como fallida y
+    los builds siguientes se paran (`P3009`) hasta resolverla. **No arreglar
+    nada a mano en la base.** Parar, reproducir el fallo en local, ver qué
+    parte llegó a aplicarse y decidir con calma (`prisma migrate resolve`).
+    Es el único caso en que habría que tocar producción desde un equipo, con
+    los valores de Supabase solo en esa terminal y nunca en el `.env`.
+- **Una columna nueva tiene que ser compatible con el código que sigue
+  desplegado** (opcional, o con un valor por defecto). La migración se aplica
+  al empezar el build, y mientras dura, la versión anterior sigue sirviendo
+  con la base ya migrada; si `next build` falla después de migrar, se queda
+  así. Un *Instant Rollback* también vuelve al código viejo sin deshacer
+  migraciones. Para borrar o renombrar algo, dos pushes: primero el código
+  deja de usarlo y después la migración que lo quita.
+- **Promover una vista previa a producción la vuelve a construir** con las
+  variables de producción (documentación de Vercel), así que también migra.
 - **Lo que Prisma no sabe escribir en el schema (índices parciales) va a mano
-  en la migración,** y antes de aplicarla se comprueba con
-  `prisma migrate diff --from-migrations … --to-schema-datamodel …` contra una
-  base temporal (nombre único, borrada en un `finally`, sin imprimir la URL)
-  que Prisma no lo borraría en la siguiente migración. Prisma 6.19.3 ignora
-  los índices parciales.
+  en la migración,** y antes de darla por buena se comprueba que Prisma no lo
+  borraría en la siguiente:
+  `npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url <base temporal> --exit-code`
+  tiene que decir "No difference detected". La base temporal se crea en el
+  contenedor (`docker exec ember-db psql -U ember -d ember -c "create database ember_shadow_check"`)
+  y se borra después con `drop database`. Prisma 6.19.3 ignora los índices
+  parciales.
+- **El seed (`prisma/seed.ts`) solo corre contra `localhost`:** antes de
+  conectarse comprueba el host de `DATABASE_URL` y `DIRECT_URL` y, si no es
+  local, se niega. No quitar esa comprobación.
+- **Los scripts en TypeScript se ejecutan con `node`, sin dependencias**
+  (Node 24 entiende TypeScript): `node --env-file=.env --import ./scripts/alias-hooks.mjs <script>.ts`.
+  `alias-hooks.mjs` traduce `@/` como `tsconfig.json`, para reutilizar
+  `lib/`.
 - **El SQL a mano va siempre con `$queryRaw`/`$executeRaw` de plantilla**
   (parametrizado), nunca con `$queryRawUnsafe`.
-- **Una columna nueva tiene que ser compatible con el código que sigue
-  desplegado** hasta el push (opcional, o con un valor por defecto), porque
-  la migración llega a producción antes que el código.
-- **Las migraciones hechas en local llegan a producción al instante.** Como
-  las dos comparten la base, `migrate dev` cambia también la de producción.
-  Si una migración borra o renombra algo, haz el push justo después: hasta
-  que se despliegue el código nuevo, producción sigue buscando lo que ya no
-  existe.
 - **Toda tabla nueva lleva su migración de RLS.** Así la API pública de
   Supabase no puede leerla. Prisma entra como `postgres`, que se salta RLS.
 - **Una sola instancia de `PrismaClient`**, la de `lib/prisma.ts`. Más
@@ -210,8 +271,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   y escribir sin `increment`: nadie más la cambia hasta el final.
 - **Transacciones cortas:** se lee con el mismo `SELECT … FOR UPDATE` lo que
   haga falta de la fila bloqueada, se calcula en el código y se escribe una
-  sola vez. Cada ida y vuelta a la base alarga el bloqueo (y desde local
-  tarda mucho).
+  sola vez. Cada ida y vuelta a la base alarga el bloqueo (contra la base
+  local es rápido, pero entre Vercel y Supabase cada viaje cuesta).
 - **La revisión de jefes vencidos es la ÚNICA escritura al cargar una
   página** (`loadRedemption()` en `lib/redemption.ts`). Es idempotente:
   ejecutarla dos veces, o en dos pestañas a la vez, castiga una sola vez.
@@ -305,7 +366,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   (`:not([class])`). Así las pantallas sin diseño se leen y las diseñadas no
   heredan nada inesperado.
 - **Los secretos nunca van a Git** (`.env*` está en `.gitignore`), ni a
-  `docs/`. Producción usa su propio `BETTER_AUTH_SECRET`.
+  `docs/`. Producción usa su propio `BETTER_AUTH_SECRET`. La única excepción
+  es `.env.example` (`!.env.example` en `.gitignore`), que solo lleva nombres
+  y valores de desarrollo.
 - **Después de cambiar una variable en Vercel, hacer Redeploy.** El despliegue
   publicado no ve el cambio.
 - **No quitar `"postinstall": "prisma generate"`.** Vercel guarda en caché las
@@ -318,9 +381,21 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 
 ## Pendientes
 
-- [ ] **Push de la redención.** La migración `20261008222051_redencion` ya
-  está en la base compartida; la tabla es nueva y `failedAt` es opcional,
-  así que el código desplegado sigue funcionando hasta el push.
+- [ ] **Quitar *Preview* de `DATABASE_URL` y `DIRECT_URL` en Vercel**
+  (Luis, desde el panel; `BETTER_AUTH_SECRET` se queda como está). Hoy las
+  dos están en *Production* y *Preview*, así que las vistas previas, aunque
+  no migran, leen y escriben en la base de producción, y fallan si su código
+  necesita una migración que aún no está allí. Al quitarlas, las vistas
+  previas no tendrán base hasta que tengan una propia.
+- [ ] **Primer despliegue de producción con la migración en el build:** tras
+  el push, mirar en el log del build de Vercel que salen "Despliegue de
+  producción: se aplican las migraciones pendientes." y "No pending
+  migrations to apply." (producción ya tiene las 9). No se puede probar antes
+  del push.
+- [ ] Chrome (la extensión de Claude) no llegaba a `localhost:3000` en la
+  sesión del 10 oct (`ERR_CONNECTION_REFUSED`, aunque el servidor respondía
+  desde la terminal). Las pruebas se hicieron por HTTP; falta mirar las
+  pantallas con el navegador contra la base local.
 - [ ] Probar la redención en Vercel (medir la carga de `/mazmorra`: hace 4
   consultas en paralelo), con lector de pantalla y en Safari y Firefox.
 - [ ] Golpe a un jefe vencido que no muere (vigilia que cruzó la
@@ -339,9 +414,10 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de pantalla, con movimiento reducido real y en Safari y Firefox.
 - [ ] Cuando llegue el inicio de sesión con Google, comprobar el avatar con
   una foto real de otro dominio (`next/image` con `unoptimized`).
-- [ ] Probar la batalla en Vercel (y medir la latencia: desde local cada
-  acción tarda ~3 s), con lector de pantalla, con movimiento reducido real y
-  en Safari y Firefox.
+- [ ] Probar la batalla en Vercel y medir allí la latencia (desde este
+  equipo contra Supabase cada acción tardaba ~3 s; contra la base local,
+  ~0,2 s en `next dev` y ~0,05 s en `next start`), con lector de pantalla,
+  con movimiento reducido real y en Safari y Firefox.
 - [ ] Batalla: al dar el golpe final, la escena se pone gris un instante antes
   de que llegue la vida nueva.
 - [ ] Tarjeta de jefe a 320 px: la fecha ocupa dos líneas junto a "Atacar"
@@ -380,11 +456,15 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   (el botón debe decir "Reproducir" y arrancarlo), en Safari y Firefox, y
   con un lector de pantalla. Detalles en
   [2026-10-06-video-hero-landing.md](sesiones/2026-10-06-video-hero-landing.md#pendientes).
-- [ ] Comprobar a qué entornos de Vercel (*Production* / *Preview*) están
-  asignadas las variables.
 - [ ] Probar en producción el cierre de sesión.
-- [ ] Si la base se recrea, volver a activar a mano el RLS de
-  `_prisma_migrations`.
+- [ ] Si la base de producción se recrea, volver a activar a mano el RLS de
+  `_prisma_migrations` (en la local no hace falta: no tiene API pública).
+- [x] ~~Separar la base de desarrollo (Docker) de la de producción y migrar
+  producción desde el build de Vercel~~ (10 oct, sin commit).
+- [x] ~~Comprobar a qué entornos de Vercel están asignadas las variables~~
+  (10 oct): `BETTER_AUTH_URL` solo en *Production*; `DATABASE_URL`,
+  `DIRECT_URL` y `BETTER_AUTH_SECRET` en *Production* y *Preview*.
+- [x] ~~Push de la redención~~ (commit `df0d0c4`).
 - [x] ~~Jefes vencidos por fecha a `FAILED` y misión de redención (tarjeta
   y avisos)~~ (8 oct).
 - [x] ~~Push de la llama~~ (commit `2fe783d`).
@@ -417,8 +497,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - [x] ~~Registro e inicio de sesión~~ (5 oct).
 - [x] ~~Desplegar en producción~~ (6 oct).
 - [x] ~~Aclarar si producción y desarrollo comparten la base~~: sí, es la
-  misma (6 oct). Por eso Vercel no necesita aplicar migraciones al
-  desplegar: ya las aplica `migrate dev` desde local.
+  misma (6 oct). Ya no: desde el 10 oct son bases separadas y producción
+  migra en el build de Vercel.
 - [x] ~~Probar en producción la redirección de `/mazmorra` sin sesión~~
   (6 oct).
 
@@ -439,3 +519,4 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 | 2026-10-08 | Fase 1: almas y niveles (tabla fija de 49 costes, bloque del personaje, recompensas en la batalla), `bossKey` obligatoria | [2026-10-08-almas-y-niveles.md](sesiones/2026-10-08-almas-y-niveles.md) |
 | 2026-10-08 | Fase 1: la llama (racha diaria en hora de Colombia, tres estados, aviso de llama extinguida, `bloquearUsuario`) | [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md) |
 | 2026-10-08 | Fase 1: jefes vencidos y misión de redención (revisión al cargar, castigo una sola vez, `RedemptionMission` con índice único parcial, tarjeta y avisos) | [2026-10-08-redencion.md](sesiones/2026-10-08-redencion.md) |
+| 2026-10-10 | Bases separadas: Postgres 17 en Docker para desarrollo, seed con cuenta de prueba, migraciones de producción en el build de Vercel | [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md) |

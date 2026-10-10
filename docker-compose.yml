@@ -1,0 +1,31 @@
+# Postgres de DESARROLLO para Ember. Producción sigue en Supabase.
+# Arrancar: docker compose up -d   ·   Parar: docker compose stop
+# Usuario, contraseña y nombre de la base salen del .env (ver .env.example).
+services:
+  db:
+    # Misma versión mayor que Supabase (17). Debian y no Alpine, para que la
+    # ordenación de textos se parezca a la de Supabase.
+    image: postgres:17
+    container_name: ember-db
+    restart: unless-stopped
+    environment:
+      # ":?" hace que Compose se niegue a arrancar si falta la variable.
+      POSTGRES_USER: ${POSTGRES_USER:?Falta POSTGRES_USER en .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Falta POSTGRES_DB en .env}
+    ports:
+      # equipo:contenedor. 5433 porque el 5432 del equipo es del Postgres de
+      # Windows. 127.0.0.1 = solo accesible desde este equipo, no desde la red.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      # Los datos viven en el volumen, no en el contenedor: sobreviven a
+      # stop/start y a down/up. Solo "docker compose down -v" los borra.
+      - ember-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  ember-pgdata:
