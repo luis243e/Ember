@@ -5,12 +5,20 @@ import { Alert } from "@/components/ui/alert";
 import { buttonStyles } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { cn } from "@/lib/cn";
-import { registrarse, type EstadoAcceso } from "./actions";
+import { registrarse, type EstadoRegistro } from "./actions";
+import { RevisaTuCorreo } from "./revisa-tu-correo";
 
-const estadoInicial: EstadoAcceso = { error: null, valores: { name: "", email: "" } };
+const estadoInicial: EstadoRegistro = {
+  error: null,
+  valores: { name: "", email: "" },
+  enviadoA: null,
+};
 
 export function RegistroForm() {
   const [estado, accion, enviando] = useActionState(registrarse, estadoInicial);
+
+  // Registrado: el enlace va de camino y no hay sesión hasta abrirlo.
+  if (estado.enviadoA) return <RevisaTuCorreo email={estado.enviadoA} />;
 
   // Tras un error, React vacía el formulario y lo rellena con los
   // defaultValue: nombre y correo vuelven, la contraseña no.

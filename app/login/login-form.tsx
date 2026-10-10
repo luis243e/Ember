@@ -10,7 +10,8 @@ import type { EstadoAcceso } from "@/app/registro/actions";
 
 const estadoInicial: EstadoAcceso = { error: null, valores: { name: "", email: "" } };
 
-export function LoginForm() {
+// avisoVerificar: llegó aquí porque su sesión no tenía el correo verificado.
+export function LoginForm({ avisoVerificar }: { avisoVerificar: boolean }) {
   const [estado, accion, enviando] = useActionState(iniciarSesion, estadoInicial);
 
   // Tras un error, React vacía el formulario y lo rellena con los
@@ -40,6 +41,12 @@ export function LoginForm() {
       {/* Se oculta mientras se envía: al volver a aparecer, el lector de
           pantalla lo anuncia aunque el mensaje sea el mismo. */}
       {estado.error && !enviando && <Alert>{estado.error}</Alert>}
+      {/* El aviso solo hasta el primer intento: después manda la respuesta. */}
+      {avisoVerificar && !estado.error && !enviando && (
+        <Alert tone="info">
+          Verifica tu correo para entrar. Al iniciar sesión te enviaremos un nuevo enlace.
+        </Alert>
+      )}
 
       <button type="submit" disabled={enviando} className={cn(buttonStyles(), "w-full")}>
         {enviando ? "Entrando..." : "Entrar al abismo"}

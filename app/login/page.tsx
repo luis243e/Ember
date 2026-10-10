@@ -6,11 +6,14 @@ export const metadata: Metadata = {
   title: "Iniciar sesión · Ember",
 };
 
-// Página estática: solo el formulario es componente de cliente.
-export default function LoginPage() {
+// Solo el formulario es componente de cliente. Lee ?aviso=verificar, que pone
+// requireUser() al echar una sesión sin el correo verificado.
+export default async function LoginPage({ searchParams }: PageProps<"/login">) {
+  const { aviso } = await searchParams;
+
   return (
     <AuthLayout page="login">
-      <LoginForm />
+      <LoginForm avisoVerificar={aviso === "verificar"} />
     </AuthLayout>
   );
 }

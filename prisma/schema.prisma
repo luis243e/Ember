@@ -84,8 +84,8 @@ model User {
   name         String
 
   // ¿Confirmó su correo? Better Auth lo pone en true cuando el usuario
-  // abre el enlace de verificación. Por ahora la verificación está
-  // desactivada, así que se queda en false.
+  // abre el enlace de verificación. Sin verificar no se puede entrar
+  // (requireEmailVerification en lib/auth.ts y requireUser()).
   emailVerified Boolean @default(false)
 
   // URL de la foto de perfil. El "?" significa OPCIONAL (puede ser null).
@@ -119,6 +119,15 @@ model User {
   // Colombia guardado a las 00:00 UTC. Con él se sabe si la llama sigue
   // encendida (reglas en lib/game.ts). null = nunca ha golpeado.
   lastStrikeDay DateTime?
+
+  // --- Límite de correos de acceso (lib/auth-emails.ts) ---
+  // Último correo enviado a esta cuenta (verificación o "ya tienes una
+  // cuenta"). null = nunca. Como mucho uno por minuto.
+  lastAuthEmailAt DateTime?
+
+  // Correos enviados desde que empezó la ventana de 24 h actual. Como mucho
+  // 5; vuelve a 1 cuando pasan 24 h desde el último.
+  authEmailCount Int @default(0)
 
   // --- Relación ---
   // Un usuario tiene MUCHAS materias. "Subject[]" (con corchetes) = lista.

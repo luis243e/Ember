@@ -12,18 +12,23 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
 - **Base de datos:** 8 tablas (`User`, `Subject`, `Task`, `StudySession`,
-  `RedemptionMission`, `Session`, `Account`, `Verification`), creadas con 9
-  migraciones. RLS activado en todas, y en producción también en
-  `_prisma_migrations` (a mano).
-- **Desarrollo y producción separadas (10 oct, sin commit):** desarrollo usa
+  `RedemptionMission`, `Session`, `Account`, `Verification`), creadas con 10
+  migraciones (la 10.ª aún no está en producción). RLS activado en todas, y
+  en producción también en `_prisma_migrations` (a mano).
+- **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
+  commit `b805759`):** desarrollo usa
   un Postgres 17 en Docker en cada equipo (`docker-compose.yml`, puerto 5433),
   que se puede borrar y recrear, con datos de prueba (`npm run db:seed`).
   Producción sigue en Supabase (Postgres 17) y **solo recibe migraciones desde
   el build de producción de Vercel** (`vercel.json` →
-  `scripts/vercel-build.mjs`). Los `.env` de los equipos ya no tienen valores
-  de producción. Detalles en
+  `scripts/vercel-build.mjs`); el log del build de `b805759` lo confirma
+  ("No pending migrations to apply."). Los `.env` de los equipos ya no
+  tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última (8 oct, ya aplicada en producción) es
+- **Migraciones:** la última es `20261010214056_limite_correos_auth` (10 oct,
+  sin commit; solo en la base local): añade `User.lastAuthEmailAt` (opcional)
+  y `User.authEmailCount` (por defecto 0). Será la primera que aplique de
+  verdad el build de Vercel. La última ya aplicada en producción (8 oct) es
   `20261008222051_redencion`: crea `RedemptionMission` (con su RLS y un
   índice único parcial para una sola misión `ACTIVE` por usuario) y añade
   `Task.failedAt` (opcional). Antes, `20261008214803_llama` añadió
@@ -36,6 +41,17 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   (`/registro`, `/login`), página protegida `/mazmorra` y cierre de sesión.
   En producción se probaron el registro, el login y la redirección de
   `/mazmorra` sin sesión a `/login` (6 oct).
+- **Verificación de correo (10 oct, sin commit):** registrarse envía un
+  correo con un enlace de 1 hora (Gmail por SMTP con nodemailer, todo en
+  `sendEmail()` de `lib/email.ts`); sin verificar no se entra, y al
+  intentarlo llega un enlace nuevo. Abrir el enlace verifica, abre la sesión
+  y lleva a `/mazmorra`. Las sesiones abiertas sin verificar se cierran
+  (`requireUser()`). Registrarse con un correo existente muestra la misma
+  pantalla "Revisa tu correo" y avisa al dueño por correo. Límite de 1 correo
+  por minuto y 5 en 24 h por cuenta. Probado en local, también con el Gmail
+  de Luis; **antes del push hay que crear `GMAIL_USER` y
+  `GMAIL_APP_PASSWORD` en Vercel**. Detalles en
+  [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
 - **Fase 1 en curso:** `/materias` (protegida) permite crear materias y ver
   la lista propia, ordenada por nombre. `/mazmorra/invocar` crea jefes
   (nombre, materia, fecha de entrega y dificultad) y `/mazmorra` lista los
@@ -135,17 +151,22 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
    | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Usuario, contraseña y base que crea el contenedor (de desarrollo, no son secretos) |
    | `DATABASE_URL`, `DIRECT_URL` | Las dos a `postgresql://…@localhost:5433/ember` |
    | `BETTER_AUTH_SECRET` | Firma las cookies de sesión |
-   | `BETTER_AUTH_URL` | `http://localhost:3000` |
+   | `BETTER_AUTH_URL` | `http://localhost:3000` (los enlaces de los correos salen de aquí) |
    | `EMBER_TEST_VIGIL_SECONDS` | Opcional: vigilias de N segundos para probar (solo en `next dev`) |
+   | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Opcionales: la cuenta de Gmail que envía los correos y su contraseña de aplicación. Vacías, el correo (con el enlace) sale en la consola de `npm run dev` |
 
 5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
    equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
    descarga la imagen. `docker compose ps` debe decir `healthy`.
-6. `npx prisma migrate deploy` crea las tablas aplicando las 9 migraciones.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 10 migraciones.
 7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
    `prueba1234`** (de desarrollo, no protege nada real) con 2 materias, 5
-   jefes en varios estados, almas y llama. Se puede repetir: rehace la cuenta.
-8. `npm run dev` y abrir http://localhost:3000/login.
+   jefes en varios estados, almas y llama, y con el correo ya verificado. Se
+   puede repetir: rehace la cuenta.
+8. `npm run dev` y abrir http://localhost:3000/login. Si con las variables de
+   Gmail rellenas sale "unable to verify the first certificate", es un
+   antivirus que intercepta el correo (en el portátil de Luis, Norton):
+   `NODE_OPTIONS=--use-system-ca npm run dev`.
 
 Para empezar de cero: `docker compose down -v` (borra el volumen con los
 datos), `docker compose up -d`, `npx prisma migrate deploy` y
@@ -319,6 +340,26 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   de validación del cuerpo los lanza `better-call` con su propia clase, que
   `instanceof` no reconoce: acababan en un 500. Lo que no pase `isAPIError`
   se relanza. Los mensajes se traducen por `code` en `lib/auth-errors.ts`.
+- **Todo correo sale por `sendEmail()` (`lib/email.ts`).** Es el único
+  archivo que sabe de Gmail: para pasar a Resend, solo se cambia ese.
+- **nodemailer fijado exacto en 10.0.10,** como better-auth.
+- **Los correos de acceso pasan siempre por el límite por cuenta**
+  (`claimAuthEmail` en `lib/auth-emails.ts`: 1 por minuto, 5 en 24 h). Lo de
+  Better Auth (por IP) no cuenta las Server Actions.
+- **Ninguna pantalla de acceso delata si un correo está registrado,** ni por
+  el texto ni por el tiempo: el registro y el reenvío responden igual, y los
+  correos se envían después de responder (`inBackground()` con `after()` en
+  `lib/auth.ts`). El reenvío llama a `auth.api.sendVerificationEmail` **sin
+  `headers`**.
+- **`requireUser()` exige el correo verificado.** `getSession` no lo mira.
+- **El texto que escribe un usuario no va en correos que pueden llegar a otro
+  buzón** (por eso el correo de verificación no lleva el nombre). Lo que vaya
+  en el HTML de un correo pasa por `escapeHtml()`.
+- **Nunca `rejectUnauthorized: false` en el SMTP.** Si un antivirus
+  intercepta el TLS: puerto 587 y `NODE_OPTIONS=--use-system-ca` en ese
+  equipo.
+- **El enlace de verificación es una llave de entrada durante una hora**
+  (`autoSignInAfterVerification`): nunca se registra en producción.
 - **`cn` no resuelve conflictos de clases:** solo las junta. El `className`
   de un componente sirve para añadir clases, no para cambiar una que ya pone
   (gana la que Tailwind escribe después en su CSS, no la última). Para
@@ -381,21 +422,42 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 
 ## Pendientes
 
-- [ ] **Quitar *Preview* de `DATABASE_URL` y `DIRECT_URL` en Vercel**
-  (Luis, desde el panel; `BETTER_AUTH_SECRET` se queda como está). Hoy las
-  dos están en *Production* y *Preview*, así que las vistas previas, aunque
-  no migran, leen y escriben en la base de producción, y fallan si su código
-  necesita una migración que aún no está allí. Al quitarlas, las vistas
-  previas no tendrán base hasta que tengan una propia.
-- [ ] **Primer despliegue de producción con la migración en el build:** tras
-  el push, mirar en el log del build de Vercel que salen "Despliegue de
-  producción: se aplican las migraciones pendientes." y "No pending
-  migrations to apply." (producción ya tiene las 9). No se puede probar antes
-  del push.
-- [ ] Chrome (la extensión de Claude) no llegaba a `localhost:3000` en la
-  sesión del 10 oct (`ERR_CONNECTION_REFUSED`, aunque el servidor respondía
-  desde la terminal). Las pruebas se hicieron por HTTP; falta mirar las
-  pantallas con el navegador contra la base local.
+- [ ] **Secuestro previo de cuenta.** Alguien puede registrar un correo
+  ajeno con su contraseña y, como el reenvío no la pide, hacer que al dueño
+  le lleguen enlaces de verificación. Si el dueño abre uno, entra
+  (`autoSignInAfterVerification`) en una cuenta cuya contraseña conoce el
+  otro. `onExistingUserSignUp` no recibe la contraseña nueva (solo `{ user }`,
+  y la `Request` es `undefined` cuando se llama desde una Server Action), y
+  reemplazarla con un `hooks.before` no lo cierra: ganaría el último en
+  registrarse, y los enlaces anteriores (JWT de 1 h) siguen valiendo.
+  **Arreglo: "olvidé mi contraseña"** (`sendResetPassword` de Better Auth),
+  para que el dueño del correo ponga la suya. Mientras tanto, el correo de
+  verificación dice "si no creaste una cuenta en Ember, ignora este correo".
+- [ ] **ANTES del push de la verificación de correo: crear en Vercel, solo
+  en *Production*, `GMAIL_USER` y `GMAIL_APP_PASSWORD`** (esta, como
+  *Sensitive*). Sin ellas nadie recibe el enlace y nadie puede entrar, ni las
+  cuentas que ya existen. `BETTER_AUTH_URL` ya está bien
+  (`https://ember-five-taupe.vercel.app`).
+- [ ] **Después del push:** mirar en el log del build que se aplica
+  `20261010214056_limite_correos_auth` (la primera migración que aplica el
+  build de verdad) y probar en producción el registro, el correo (enviado
+  desde Vercel por el 587), el enlace y la salida de las sesiones sin
+  verificar. Luis tendrá que verificar su propia cuenta al entrar.
+- [ ] **El cupo de Gmail (500 al día) se puede agotar** registrando correos
+  inventados: las Server Actions no tienen límite por IP. Más adelante, un
+  captcha o un tope global de envíos.
+- [ ] **Los correos salen de la dirección personal de Gmail de Luis.** Pasar
+  a Resend con dominio propio (solo `lib/email.ts`).
+- [ ] **El token del enlace queda en los logs de peticiones** (`next dev` y
+  Vercel) hasta que caduca (1 h). Solo los ve Luis.
+- [ ] Probar "Revisa tu correo" y `/verificar-correo` a 320 px, con lector de
+  pantalla y en Safari y Firefox. Confirmar que llegaron a Gmail el aviso
+  "Ya tienes una cuenta" (`+prueba2`) y el reenvío al entrar sin verificar
+  (`+prueba1`).
+- [ ] Chrome (la extensión de Claude): con dos navegadores conectados,
+  "Browser 1" no llega a `localhost:3000` y "Browser 2" sí (sesión de la
+  verificación de correo). Falta mirar con el navegador las pantallas de
+  la fase 1 contra la base local.
 - [ ] Probar la redención en Vercel (medir la carga de `/mazmorra`: hace 4
   consultas en paralelo), con lector de pantalla y en Safari y Firefox.
 - [ ] Golpe a un jefe vencido que no muere (vigilia que cruzó la
@@ -423,9 +485,6 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Tarjeta de jefe a 320 px: la fecha ocupa dos líneas junto a "Atacar"
   (sin desbordar).
 
-- [ ] **Activar la verificación de correo.** Urgente: la app ya es pública y
-  cualquiera puede registrarse con un correo ajeno. Pasos en
-  [2026-10-05-auth-better-auth.md](sesiones/2026-10-05-auth-better-auth.md).
 - [ ] **Índice único sobre `(userId, lower(name))` en `Subject`** para
   cerrar la carrera del duplicado: dos envíos casi simultáneos pueden crear
   la misma materia dos veces. Hará falta una migración con SQL a mano.
@@ -436,8 +495,6 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   (hoy es la constante `APP_TIME_ZONE`).
 - [ ] **Validar el nombre del registro en el servidor** con `normalizeName()`:
   hoy se acepta vacío o solo con espacios (Better Auth admite `""`).
-- [ ] **"Ya existe una cuenta con ese correo." permite averiguar si un correo
-  está registrado.** Revisarlo cuando se active la verificación de correo.
 - [ ] Probar en producción `/login` y `/registro` rediseñados, y con un
   lector de pantalla.
 - [ ] Inicio de sesión con Google.
@@ -459,8 +516,22 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base de producción se recrea, volver a activar a mano el RLS de
   `_prisma_migrations` (en la local no hace falta: no tiene API pública).
+- [x] ~~Activar la verificación de correo~~ (10 oct, sin commit): enlace al
+  registrarse y al entrar sin verificar, entrada automática al abrirlo y
+  sesiones sin verificar fuera.
+- [x] ~~"Ya existe una cuenta con ese correo." permitía averiguar si un
+  correo está registrado~~ (10 oct, sin commit): el registro responde igual
+  y en el mismo tiempo, y el dueño recibe un correo.
+- [x] ~~Primer despliegue de producción con la migración en el build~~
+  (10 oct): el log del build de `b805759` muestra "Despliegue de producción:
+  se aplican las migraciones pendientes." y "No pending migrations to
+  apply.", y el despliegue quedó `READY`.
+- [x] ~~Quitar *Preview* de `DATABASE_URL` y `DIRECT_URL` en Vercel~~
+  (10 oct, Luis desde el panel): las dos están ya solo en *Production*. Las
+  vistas previas no tienen base hasta que tengan una propia.
+  `BETTER_AUTH_SECRET` sigue en *Production* y *Preview*.
 - [x] ~~Separar la base de desarrollo (Docker) de la de producción y migrar
-  producción desde el build de Vercel~~ (10 oct, sin commit).
+  producción desde el build de Vercel~~ (10 oct, commit `b805759`).
 - [x] ~~Comprobar a qué entornos de Vercel están asignadas las variables~~
   (10 oct): `BETTER_AUTH_URL` solo en *Production*; `DATABASE_URL`,
   `DIRECT_URL` y `BETTER_AUTH_SECRET` en *Production* y *Preview*.
@@ -520,3 +591,4 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-08 | Fase 1: la llama (racha diaria en hora de Colombia, tres estados, aviso de llama extinguida, `bloquearUsuario`) | [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md) |
 | 2026-10-08 | Fase 1: jefes vencidos y misión de redención (revisión al cargar, castigo una sola vez, `RedemptionMission` con índice único parcial, tarjeta y avisos) | [2026-10-08-redencion.md](sesiones/2026-10-08-redencion.md) |
 | 2026-10-10 | Bases separadas: Postgres 17 en Docker para desarrollo, seed con cuenta de prueba, migraciones de producción en el build de Vercel | [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md) |
+| 2026-10-10 | Verificación de correo (Gmail por SMTP, enlace con entrada automática, límite por cuenta, enumeración cerrada, Norton y el puerto 587) | [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md) |

@@ -16,5 +16,11 @@ export const requireUser = cache(async () => {
   // la función nunca llega a devolver undefined.
   if (!session) redirect("/login");
 
+  // Una sesión abierta antes de activar la verificación sigue siendo válida
+  // para Better Auth (getSession no mira emailVerified). Sin el correo
+  // verificado, fuera: /login lo explica y, al entrar, Better Auth envía un
+  // enlace nuevo.
+  if (!session.user.emailVerified) redirect("/login?aviso=verificar");
+
   return session.user;
 });

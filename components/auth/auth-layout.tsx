@@ -3,10 +3,11 @@ import type { ReactNode } from "react";
 import { cardStyles } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 
-type AuthPage = "login" | "registro";
+type AuthPage = "login" | "registro" | "verificar";
 
-// Lo único que cambia entre las dos pantallas (Figma "LOGIN FINAL" y
-// "REGISTRO FINAL").
+// Lo único que cambia entre las pantallas (Figma "LOGIN FINAL" y
+// "REGISTRO FINAL"; la de verificar correo no tiene marco y usa el fondo del
+// login).
 const PAGES: Record<
   AuthPage,
   { title: string; tagline: string; footer: string; footerLink: { href: string; label: string } }
@@ -23,8 +24,15 @@ const PAGES: Record<
     footer: "¿Ya tienes cuenta?",
     footerLink: { href: "/login", label: "Vuelve al fuego." },
   },
+  verificar: {
+    title: "Verificar correo",
+    tagline: "Confirma que la llama es tuya",
+    footer: "¿Ya lo confirmaste?",
+    footerLink: { href: "/login", label: "Vuelve al fuego." },
+  },
 };
 
+// En "verificar" ninguna pestaña está marcada.
 const TABS: { page: AuthPage; href: string; label: string }[] = [
   { page: "login", href: "/login", label: "Entrar" },
   { page: "registro", href: "/registro", label: "Registrarse" },
@@ -43,7 +51,8 @@ type AuthLayoutProps = {
 // Fondo, logo, tarjeta, pestañas y pie compartidos por /login y /registro.
 export function AuthLayout({ page, children }: AuthLayoutProps) {
   const { title, tagline, footer, footerLink } = PAGES[page];
-  const isLogin = page === "login";
+  // El fondo de luz cálida y el resplandor: login y verificar.
+  const warmLight = page !== "registro";
 
   return (
     <main
@@ -53,12 +62,12 @@ export function AuthLayout({ page, children }: AuthLayoutProps) {
         "relative flex min-h-dvh flex-1 flex-col items-center justify-center overflow-x-clip px-4 py-12 md:py-20",
         // Login: luz cálida que baja desde arriba (degradado radial). Las
         // medidas en % son las del Figma, iguales en 1440 y en 375.
-        isLogin &&
+        warmLight &&
           "bg-radial-[83.33%_55.56%_at_50%_-5.56%] from-ember-deep via-night-alt via-45% to-night",
       )}
     >
       {/* Registro: fuego a los dos lados. 64 px en móvil, 260 a 1440. */}
-      {!isLogin && (
+      {!warmLight && (
         <>
           <div
             aria-hidden
@@ -83,7 +92,7 @@ export function AuthLayout({ page, children }: AuthLayoutProps) {
         {/* isolate: el resplandor (-z-10) queda detrás del logo, pero no
             detrás del fondo de la página. */}
         <div className="relative isolate flex flex-col items-center gap-2">
-          {isLogin && (
+          {warmLight && (
             <div
               aria-hidden
               className="pointer-events-none absolute top-1/2 left-1/2 -z-10 h-[300px] w-[420px] -translate-x-1/2 -translate-y-1/2 bg-radial-[closest-side] from-ember/35 via-ember/7 via-50% to-ember/0 md:h-[420px] md:w-[640px]"
