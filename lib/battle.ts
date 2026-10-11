@@ -1,0 +1,496 @@
+// El corazón de la batalla: comenzar una vigilia, asestar el golpe y contestar
+// el contraataque, con sus transacciones y sus bloqueos.
+//
+// ⚠ SOLO del servidor. Este archivo NUNCA se importa desde un componente de
+//   cliente: lee y escribe la base, y sus funciones confían en lo que reciben.
+//   Las llaman las Server Actions de app/mazmorra/batalla/[id]/actions.ts,
+//   que antes comprueban la sesión (requireUser) y que la tarea o el
+//   contraataque sean del usuario, y scripts/probar-contraataque.ts. Por eso
+//   no va en el archivo "use server": todo lo que exporta ese archivo es una
+//   acción que cualquiera puede llamar con el userId que quiera.
+//
+// ORDEN DE BLOQUEO, en todas las transacciones de la app:
+//   tarea → vigilia → contraataque → usuario → misión de redención.
+// Quien no necesite alguna fila se la salta, pero nunca cambia el orden: así
+// dos peticiones simultáneas se ponen en fila en vez de esperarse la una a la
+// otra para siempre (interbloqueo). La revisión de jefes vencidos
+// (lib/redemption.ts) sigue el mismo orden sin vigilia ni contraataque.
+import { Prisma, type Difficulty, type TaskStatus } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { todayDateInAppTimeZone, todayInAppTimeZone } from "@/lib/dates";
+import {
+  advanceRedemption,
+  applySoulsDelta,
+  COUNTERATTACK,
+  counterattackSouls,
+  flameAfterStrike,
+  HP_PER_BLOCK,
+  levelForSouls,
+  rollStrikeSouls,
+  rollVictorySouls,
+  vigilDurationMs,
+  type AnswerOutcome,
+} from "@/lib/game";
+import { preguntasParaContraataque } from "@/lib/questions/provider";
+import {
+  buildItems,
+  parseItems,
+  resolveItem,
+  toOriginalIndex,
+  toShownIndex,
+} from "@/lib/questions/counterattack";
+import { formatCountdown } from "@/app/mazmorra/batalla/[id]/countdown";
+
+// Lo que devuelven comenzar, abandonar y golpear. Si ok es false, error lleva
+// el mensaje que verá el usuario. Los campos opcionales solo los da
+// asestarGolpe: strikeSouls son las almas del golpe, victorySouls las de la
+// victoria (solo si el jefe cayó), recoveredSouls las que vuelven al cumplir
+// la misión de redención (solo si este golpe la cumplió) y newLevel el nivel
+// alcanzado (solo si se subió).
+export type ResultadoBatalla =
+  | {
+      ok: true;
+      currentHp?: number;
+      defeated?: boolean;
+      strikeSouls?: number;
+      victorySouls?: number;
+      recoveredSouls?: number;
+      newLevel?: number;
+    }
+  | { ok: false; error: string };
+
+export const fallo = (error: string): ResultadoBatalla => ({ ok: false, error });
+
+// Bloquea la fila de la tarea hasta el final de la transacción y devuelve lo
+// que hace falta de ella. Comenzar y golpear empiezan SIEMPRE por aquí, y en
+// el mismo orden (tarea → vigilia → contraataque → usuario → misión), para
+// que dos peticiones simultáneas se pongan en fila en vez de bloquearse la
+// una a la otra. La revisión de jefes vencidos (lib/redemption.ts) sigue el
+// mismo orden.
+// $queryRaw con plantilla: el id viaja como parámetro, nunca pegado al SQL.
+async function bloquearTarea(tx: Prisma.TransactionClient, taskId: string) {
+  const rows = await tx.$queryRaw<
+    { status: TaskStatus; currentHp: number; difficulty: Difficulty; dueDate: Date }[]
+  >`
+    SELECT "status", "currentHp", "difficulty", "dueDate" FROM "Task"
+    WHERE "id" = ${taskId} FOR UPDATE`;
+  return rows[0];
+}
+
+// Lo mismo con la fila del usuario: la bloquea hasta el final de la
+// transacción y devuelve lo que hace falta para calcular almas, nivel y
+// llama. Va después de la tarea, la vigilia y el contraataque, y antes de la
+// misión (tarea → vigilia → contraataque → usuario → misión). Con la fila
+// bloqueada nadie más puede cambiar esos valores, así que se calculan en el
+// código y se escriben de una vez.
+async function bloquearUsuario(tx: Prisma.TransactionClient, userId: string) {
+  const rows = await tx.$queryRaw<
+    { souls: number; level: number; flame: number; lastStrikeDay: Date | null }[]
+  >`
+    SELECT "souls", "level", "flame", "lastStrikeDay" FROM "User"
+    WHERE "id" = ${userId} FOR UPDATE`;
+  return rows[0];
+}
+
+// La misión de redención activa del usuario, bloqueada, o undefined si no
+// tiene. Va SIEMPRE la última, después del usuario: la revisión de jefes
+// vencidos la crea y la resuelve con el usuario ya bloqueado.
+async function bloquearMision(tx: Prisma.TransactionClient, userId: string) {
+  const rows = await tx.$queryRaw<
+    { id: string; vigilsDone: number; deadline: Date; soulsAtStake: number }[]
+  >`
+    SELECT "id", "vigilsDone", "deadline", "soulsAtStake" FROM "RedemptionMission"
+    WHERE "userId" = ${userId} AND "status" = 'ACTIVE' FOR UPDATE`;
+  return rows[0];
+}
+
+// El contraataque, bloqueado, solo si es de ese usuario; undefined si no
+// existe o es de otro (la acción responde 404 sin distinguir). Va después de
+// la tarea y la vigilia y antes del usuario.
+async function bloquearContraataque(
+  tx: Prisma.TransactionClient,
+  counterattackId: string,
+  userId: string,
+) {
+  const rows = await tx.$queryRaw<
+    {
+      studySessionId: string;
+      items: Prisma.JsonValue;
+      answered: number;
+      correctCount: number;
+      soulsDelta: number;
+      finishedAt: Date | null;
+    }[]
+  >`
+    SELECT "studySessionId", "items", "answered", "correctCount", "soulsDelta", "finishedAt"
+    FROM "Counterattack"
+    WHERE "id" = ${counterattackId} AND "userId" = ${userId} FOR UPDATE`;
+  return rows[0];
+}
+
+// ---------------------------------------------------------------------------
+//  Comenzar la vigilia
+// ---------------------------------------------------------------------------
+
+export async function comenzarVigiliaDe(userId: string, taskId: string): Promise<ResultadoBatalla> {
+  // El reloj es el del servidor: inicio y fin quedan fijados aquí.
+  const now = new Date();
+  const durationMs = vigilDurationMs();
+  const endsAt = new Date(now.getTime() + durationMs);
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // Si a la vez se está asestando el golpe final a este jefe, esperamos
+      // a que termine y vemos que ya no está vivo.
+      const locked = await bloquearTarea(tx, taskId);
+      if (locked?.status !== "ALIVE") return fallo("Este jefe ya ha caído.");
+      // Su día de entrega ya terminó: el jefe te ha vencido, aunque la
+      // revisión todavía no lo haya marcado (lo hará al volver a pintar).
+      // Con la tarea bloqueada, la revisión no puede colarse en medio.
+      if (locked.dueDate < todayDateInAppTimeZone(now)) {
+        return fallo("Este jefe ya te ha vencido: su fecha de entrega pasó.");
+      }
+
+      await tx.studySession.create({
+        data: {
+          taskId,
+          userId,
+          startedAt: now,
+          endsAt,
+          // Hacia arriba: con la vigilia corta de prueba cuenta como 1 minuto.
+          durationMinutes: Math.ceil(durationMs / 60_000),
+        },
+      });
+
+      // Una vigilia nueva cierra el contraataque que quedara sin terminar
+      // (de este jefe o de otro): las preguntas que faltaban ni cuentan ni
+      // restan. Va después de la vigilia, en el orden de bloqueo.
+      await tx.counterattack.updateMany({
+        where: { userId, finishedAt: null },
+        data: { finishedAt: now },
+      });
+      return { ok: true } as const;
+    });
+  } catch (error) {
+    // P2002 = choque con un índice único. Aquí solo puede ser el de "una
+    // vigilia abierta por usuario" (StudySession_userId_open_key).
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return fallo("Ya tienes una vigilia en curso. Termínala o abandónala antes de empezar otra.");
+    }
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Asestar el golpe
+// ---------------------------------------------------------------------------
+
+// task: la tarea, ya comprobado que es del usuario. subjectId hace falta para
+// pedir las preguntas del contraataque.
+export async function asestarGolpeDe(
+  userId: string,
+  task: { id: string; subjectId: string },
+): Promise<ResultadoBatalla> {
+  const now = new Date();
+
+  // La transacción devuelve el resultado y, si hay contraataque, la vigilia
+  // cerrada a la que pertenecerá.
+  type Golpe = { resultado: ResultadoBatalla; studySessionId?: string };
+  const { resultado, studySessionId } = await prisma.$transaction(async (tx): Promise<Golpe> => {
+    // 1. Primero la tarea (mismo orden que comenzarVigilia). NO se mira la
+    // fecha de entrega: una vigilia que empezó a tiempo y cruzó la medianoche
+    // se puede golpear (la revisión no marca un jefe con vigilia abierta).
+    // Del mismo SELECT ... FOR UPDATE sale la vida: con la fila bloqueada
+    // nadie puede cambiarla hasta el final, así que se calcula aquí sin
+    // volver a leerla.
+    const locked = await bloquearTarea(tx, task.id);
+    if (locked?.status !== "ALIVE") return { resultado: fallo("Este jefe ya ha caído.") };
+
+    // 2. Cerrar la vigilia SOLO si es mía, sigue abierta y su hora de fin ya
+    // pasó, y guardar en ella las almas del golpe. Es una actualización
+    // condicional: si otra pestaña la cerró primero, esta no encuentra nada
+    // y no hay doble golpe ni doble ración de almas. Devuelve la vigilia
+    // cerrada: su id es el del contraataque.
+    const strikeSouls = rollStrikeSouls();
+    const closed = await tx.studySession.updateManyAndReturn({
+      where: { taskId: task.id, userId, completedAt: null, endsAt: { lte: now } },
+      data: { completedAt: now, soulsEarned: strikeSouls },
+      select: { id: true },
+    });
+
+    if (closed.length === 0) {
+      // ¿Por qué no? Para dar un mensaje claro. Aquí se sale sin tocar al
+      // usuario: un golpe rechazado no da almas.
+      const abierta = await tx.studySession.findFirst({
+        where: { taskId: task.id, userId, completedAt: null },
+        select: { endsAt: true },
+      });
+      if (abierta) {
+        const restante = formatCountdown(abierta.endsAt.getTime() - now.getTime());
+        return { resultado: fallo(`La vigilia aún no ha terminado: faltan ${restante}.`) };
+      }
+      return {
+        resultado: fallo(
+          "No hay ninguna vigilia que golpear. Puede que ya asestaras el golpe en otra pestaña.",
+        ),
+      };
+    }
+
+    // 3. La vida nueva, que nunca baja de 0. Al llegar a 0 el jefe cae y se
+    // tiran las almas de la victoria. UNA sola escritura de la tarea con
+    // todo junto: vida, estado y recompensa.
+    const currentHp = Math.max(locked.currentHp - HP_PER_BLOCK, 0);
+    const defeated = currentHp === 0;
+    const victorySouls = defeated ? rollVictorySouls(locked.difficulty) : undefined;
+    await tx.task.update({
+      where: { id: task.id },
+      data: defeated ? { currentHp, status: "DEFEATED", victorySouls } : { currentHp },
+    });
+
+    // 4. El usuario y 5. su misión de redención, bloqueados en ese orden. Se
+    // calcula todo en el código y el usuario se escribe UNA vez. Almas: el
+    // total nuevo, con las de la misión si este golpe la cumple. Nivel: se
+    // deduce del total con levelForSouls y se escribe solo si cambia (User.level
+    // lo escriben SOLO este golpe y responderPreguntaDe, los dos así). Llama:
+    // con el día de hoy en hora de Colombia, el mismo "hoy" que las fechas de
+    // entrega.
+    const owner = await bloquearUsuario(tx, userId);
+    const mission = await bloquearMision(tx, userId);
+    // Cómo avanza la misión lo decide SOLO advanceRedemption (lib/game.ts).
+    // null = no hay misión o su plazo ya pasó (la revisión la marcará).
+    const advance = mission ? advanceRedemption(mission, now) : null;
+    let recoveredSouls = 0;
+    if (mission && advance) {
+      if (advance.completed) recoveredSouls = mission.soulsAtStake;
+      await tx.redemptionMission.update({
+        where: { id: mission.id },
+        data: advance.completed
+          ? { vigilsDone: advance.vigilsDone, status: "COMPLETED", resolvedAt: now }
+          : { vigilsDone: advance.vigilsDone },
+      });
+    }
+
+    const gained = strikeSouls + (victorySouls ?? 0) + recoveredSouls;
+    const souls = owner.souls + gained;
+    const level = levelForSouls(souls).level;
+    const flame = flameAfterStrike(owner.flame, owner.lastStrikeDay, todayInAppTimeZone(now));
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        souls,
+        ...(level !== owner.level && { level }),
+        flame: flame.flame,
+        lastStrikeDay: flame.lastStrikeDay,
+      },
+    });
+    // ¿Se subió de nivel con ESTE golpe? Se compara con el nivel que daban
+    // las almas de antes, no con la columna.
+    const leveledUp = level > levelForSouls(owner.souls).level;
+
+    return {
+      resultado: {
+        ok: true,
+        currentHp,
+        defeated,
+        strikeSouls,
+        victorySouls,
+        recoveredSouls: recoveredSouls > 0 ? recoveredSouls : undefined,
+        newLevel: leveledUp ? level : undefined,
+      },
+      // El contraataque solo si el jefe sigue vivo: si cayó, no contraataca.
+      studySessionId: defeated ? undefined : closed[0].id,
+    };
+    // timeout: con la misión son hasta nueve viajes a la base (~250 ms cada
+    // uno desde local), más la espera si la revisión de jefes vencidos tiene
+    // al usuario bloqueado. Los 5 s por defecto se quedarían cortos.
+  }, { timeout: 15_000 });
+
+  // 6. El contraataque, FUERA de la transacción y después de que el golpe ya
+  // cuenta: si algo falla aquí, el golpe y sus almas no se pierden; solo no
+  // hay preguntas esta vez.
+  if (studySessionId) await crearContraataque(userId, task.subjectId, studySessionId);
+
+  return resultado;
+}
+
+// Crea el contraataque de una vigilia recién golpeada. Nunca lanza: registra
+// el error y sigue. El índice único de studySessionId impide un segundo
+// contraataque para la misma vigilia (P2002), aunque esto se llamara dos
+// veces.
+async function crearContraataque(userId: string, subjectId: string, studySessionId: string) {
+  try {
+    const questions = await preguntasParaContraataque(userId, subjectId, COUNTERATTACK.questions);
+    if (questions.length === 0) return;
+    await prisma.counterattack.create({
+      data: { studySessionId, userId, items: buildItems(questions) },
+    });
+  } catch (error) {
+    console.error("No se pudo crear el contraataque; el golpe cuenta igual.", error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Contestar el contraataque
+// ---------------------------------------------------------------------------
+
+// correct / wrong / dodged como en lib/game.ts; answered = contestó una
+// genérica (no hay buena ni mala); skipped = la pregunta ya no existe y se
+// salta sin almas.
+export type RespuestaOutcome = AnswerOutcome | "answered" | "skipped";
+
+export type ResultadoRespuesta =
+  | {
+      ok: true;
+      outcome: RespuestaOutcome;
+      // La correcta EN EL ORDEN MOSTRADO; null en las genéricas y al saltar.
+      correctIndex: number | null;
+      explanation: string | null;
+      // Almas que de verdad cambiaron (con el suelo del nivel aplicado).
+      soulsDelta: number;
+      // La respuesta restaba, pero el nivel lo impidió (en parte o del todo).
+      protectedByLevel: boolean;
+      newLevel?: number;
+      // Solo al contestar la última: aciertos sobre el total y almas totales.
+      summary?: { correct: number; total: number; souls: number };
+    }
+  | { ok: false; error: string };
+
+const falloRespuesta = (error: string): ResultadoRespuesta => ({ ok: false, error });
+
+// Contesta la pregunta número `questionNumber` (empieza en 0) del contraataque
+// con la opción MOSTRADA `chosenIndex`, o la esquiva (null). null = el
+// contraataque no existe o es de otro usuario (la acción responde 404).
+//
+// questionNumber es la pregunta que el navegador está enseñando. Si no es la
+// que toca (otra pestaña ya la contestó), no se toca nada: así una respuesta
+// nunca se aplica a una pregunta que el usuario no ha visto.
+export async function responderPreguntaDe(
+  userId: string,
+  counterattackId: string,
+  questionNumber: number,
+  chosenIndex: number | null,
+): Promise<ResultadoRespuesta | null> {
+  const now = new Date();
+
+  try {
+    return await prisma.$transaction(async (tx): Promise<ResultadoRespuesta | null> => {
+      // 1. El contraataque, bloqueado: si otra pestaña contesta a la vez,
+      // espera aquí y después ve answered ya cambiado.
+      const counter = await bloquearContraataque(tx, counterattackId, userId);
+      if (!counter) return null;
+      if (counter.finishedAt) return falloRespuesta("Este contraataque ya terminó.");
+      if (questionNumber !== counter.answered) {
+        return falloRespuesta("Esa pregunta ya se contestó, quizá en otra pestaña.");
+      }
+
+      const items = parseItems(counter.items);
+      const item = items[counter.answered];
+      if (!item) return falloRespuesta("Este contraataque ya terminó.");
+      if (
+        chosenIndex !== null &&
+        (!Number.isInteger(chosenIndex) || chosenIndex < 0 || chosenIndex >= item.order.length)
+      ) {
+        return falloRespuesta("Esa opción no existe.");
+      }
+
+      const isLast = counter.answered + 1 >= items.length;
+      const question = await resolveItem(tx, item);
+
+      // 2. Qué pasó y cuántas almas daría. La opción mostrada se traduce a la
+      // de la pregunta con la permutación guardada.
+      let outcome: RespuestaOutcome;
+      let nominal = 0;
+      let originalChosen: number | null = null;
+      if (!question) {
+        outcome = "skipped";
+      } else if (chosenIndex === null) {
+        outcome = "dodged";
+        nominal = counterattackSouls(question.kind, "dodged");
+      } else {
+        originalChosen = toOriginalIndex(item.order, chosenIndex);
+        // En las genéricas el correctIndex no decide nada.
+        outcome =
+          question.kind === "GENERIC"
+            ? "answered"
+            : originalChosen === question.correctIndex
+              ? "correct"
+              : "wrong";
+        nominal = counterattackSouls(question.kind, outcome === "answered" ? "correct" : outcome);
+      }
+
+      // 3. El usuario (después del contraataque), solo si cambian las almas.
+      // Lo que se resta nunca baja de nivel (applySoulsDelta), y el nivel se
+      // deduce de las almas con levelForSouls, igual que en el golpe.
+      let applied = 0;
+      let newLevel: number | undefined;
+      if (nominal !== 0) {
+        const owner = await bloquearUsuario(tx, userId);
+        const next = applySoulsDelta(owner.souls, nominal);
+        applied = next.applied;
+        const level = levelForSouls(next.souls).level;
+        if (applied !== 0) {
+          await tx.user.update({
+            where: { id: userId },
+            data: { souls: next.souls, ...(level !== owner.level && { level }) },
+          });
+        }
+        if (level > levelForSouls(owner.souls).level) newLevel = level;
+      }
+
+      // 4. El intento, solo con preguntas del banco (las genéricas no están
+      // en la base). Esquivar se guarda como no acertada: el paso 3 la hará
+      // volver antes.
+      if (question?.questionId) {
+        await tx.questionAttempt.create({
+          data: {
+            questionId: question.questionId,
+            userId,
+            studySessionId: counter.studySessionId,
+            chosenIndex: originalChosen,
+            correct: outcome === "correct",
+            soulsDelta: applied,
+          },
+        });
+      }
+
+      // 5. El contraataque avanza una pregunta, con todo en una escritura.
+      const counted = outcome === "correct" || outcome === "answered";
+      const correctCount = counter.correctCount + (counted ? 1 : 0);
+      const soulsDelta = counter.soulsDelta + applied;
+      await tx.counterattack.update({
+        where: { id: counterattackId },
+        data: {
+          answered: counter.answered + 1,
+          correctCount,
+          soulsDelta,
+          ...(isLast && { finishedAt: now }),
+        },
+      });
+
+      return {
+        ok: true,
+        outcome,
+        correctIndex:
+          question && question.kind !== "GENERIC"
+            ? toShownIndex(item.order, question.correctIndex)
+            : null,
+        explanation: question?.explanation ?? null,
+        soulsDelta: applied,
+        protectedByLevel: nominal < 0 && applied > nominal,
+        newLevel,
+        summary: isLast ? { correct: correctCount, total: items.length, souls: soulsDelta } : undefined,
+      };
+      // maxWait: lo que se espera a tener una conexión libre para empezar.
+      // Con dos pestañas contestando a la vez, la segunda puede necesitar una
+      // conexión nueva, y abrirla cuesta (contra la base local de Windows se
+      // midieron ~2 s, justo los 2 s por defecto: fallaba con P2028).
+    }, { timeout: 15_000, maxWait: 10_000 });
+  } catch (error) {
+    // P2003 = clave foránea rota: la pregunta se borró justo entre leerla y
+    // guardar el intento. No se ha guardado nada; al reintentar, se salta.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      return falloRespuesta("Esa pregunta se acaba de borrar. Vuelve a intentarlo.");
+    }
+    throw error;
+  }
+}

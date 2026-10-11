@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { loadRedemption } from "@/lib/redemption";
 import { bossForTask, bossImageSrc, DIFFICULTY_LABELS, vigilDurationMs } from "@/lib/game";
+import { parseItems, publicQuestion, resolveItem } from "@/lib/questions/counterattack";
 import { Batalla } from "./batalla";
 
 // La tarea, solo si es del usuario.
@@ -45,7 +47,7 @@ export async function generateMetadata({
 type OwnTask = NonNullable<Awaited<ReturnType<typeof getTask>>>;
 
 async function loadBattle(task: OwnTask, userId: string) {
-  const [openVigil, stats, finalStrike] = await Promise.all([
+  const [openVigil, stats, finalStrike, counter] = await Promise.all([
     // La vigilia abierta del usuario, sea de este jefe o de otro (solo puede
     // haber una: lo garantiza un índice único de la base).
     prisma.studySession.findFirst({
@@ -67,10 +69,18 @@ async function loadBattle(task: OwnTask, userId: string) {
           select: { soulsEarned: true },
         })
       : null,
+    // El contraataque sin terminar contra ESTE jefe, si lo hay: al recargar o
+    // volver, se retoma en la pregunta que tocaba. El filtro por la vigilia
+    // es parte de la misma consulta (no es una lectura aparte).
+    prisma.counterattack.findFirst({
+      where: { userId, finishedAt: null, studySession: { taskId: task.id } },
+      select: { id: true, items: true, answered: true },
+    }),
   ]);
 
   const boss = bossForTask(task);
   const isThisTask = openVigil?.taskId === task.id;
+  const counterattack = counter ? await loadCounterattack(counter) : null;
 
   return {
     task: {
@@ -82,7 +92,7 @@ async function loadBattle(task: OwnTask, userId: string) {
       currentHp: task.currentHp,
       status: task.status,
     },
-    boss: { name: boss.name, src: bossImageSrc(boss.key) },
+    boss: { name: boss.name, article: boss.article, src: bossImageSrc(boss.key) },
     // Fechas como milisegundos: entre servidor y cliente solo viajan datos
     // simples.
     vigil: openVigil && isThisTask ? { endsAt: openVigil.endsAt.getTime() } : null,
@@ -102,6 +112,27 @@ async function loadBattle(task: OwnTask, userId: string) {
       task.victorySouls !== null && finalStrike?.soulsEarned != null
         ? { strikeSouls: finalStrike.soulsEarned, victorySouls: task.victorySouls }
         : null,
+    counterattack,
+  };
+}
+
+// La pregunta que toca del contraataque, en la forma que puede ver el
+// navegador: enunciado y opciones ya barajadas, y nada más (ni el id de la
+// pregunta, ni la correcta, ni la explicación: las da la acción al contestar).
+// question null = la pregunta se borró del banco a mitad del contraataque; la
+// pantalla lo dice y, al seguir, la acción la salta sin almas. Solo hay una
+// lectura más (la pregunta), y solo cuando hay contraataque.
+async function loadCounterattack(counter: { id: string; items: Prisma.JsonValue; answered: number }) {
+  const items = parseItems(counter.items);
+  const item = items[counter.answered];
+  if (!item) return null;
+  const question = await resolveItem(prisma, item);
+  return {
+    id: counter.id,
+    // Empieza en 0: es lo que la acción espera recibir de vuelta.
+    number: counter.answered,
+    total: items.length,
+    question: question ? publicQuestion(question, item.order) : null,
   };
 }
 

@@ -133,6 +133,62 @@ export function levelForSouls(souls: number): LevelProgress {
   };
 }
 
+// Suma (o resta) almas sin bajar NUNCA de nivel: lo que se resta deja, como
+// mucho, las almas justo al inicio del nivel actual. Lo que se suma no tiene
+// tope, y puede hacer subir de nivel. applied es lo que de verdad cambió
+// (con una resta, puede ser menos que delta, incluso 0). El nivel se sigue
+// deduciendo de las almas con levelForSouls.
+export function applySoulsDelta(souls: number, delta: number): { souls: number; applied: number } {
+  if (delta >= 0) return { souls: souls + delta, applied: delta };
+  const floor = souls - levelForSouls(souls).soulsIntoLevel;
+  const after = Math.max(floor, souls + delta);
+  return { souls: after, applied: after - souls };
+}
+
+// ---------------------------------------------------------------------------
+//  Contraataque (preguntas después de un golpe)
+// ---------------------------------------------------------------------------
+
+// Después de un golpe aceptado que NO derrota al jefe, el jefe contraataca con
+// hasta `questions` preguntas de su materia, una cada vez y sin reloj.
+//
+// Almas por pregunta. Los números están elegidos para que contestar AL AZAR dé
+// 0 de media (valor esperado):
+//   - opción múltiple (4 opciones): ¼ · 15 + ¾ · (−5) = 0
+//   - verdadero o falso (2):        ½ · 10 + ½ · (−10) = 0
+// Así, adivinar no compensa: solo gana almas quien sabe la respuesta.
+// Las genéricas (autoevaluación) dan lo mismo contesten lo que contesten y
+// nunca restan: no hay respuesta buena, y premiar el "Sí" sería premiar
+// mentir. Esquivar ni da ni quita.
+// Lo que se resta nunca baja de nivel (applySoulsDelta), y contestar no toca
+// la llama ni la misión de redención.
+export type CounterattackKind = "MULTIPLE_CHOICE" | "TRUE_FALSE" | "GENERIC";
+
+// correct = acertó (o contestó una genérica); wrong = falló; dodged = esquivó.
+export type AnswerOutcome = "correct" | "wrong" | "dodged";
+
+export const COUNTERATTACK = {
+  questions: 3,
+  souls: {
+    MULTIPLE_CHOICE: { correct: 15, wrong: -5 },
+    TRUE_FALSE: { correct: 10, wrong: -10 },
+    // Conteste lo que conteste: por eso las dos son iguales.
+    GENERIC: { correct: 5, wrong: 5 },
+  },
+  dodge: 0,
+} as const satisfies {
+  questions: number;
+  souls: Record<CounterattackKind, { correct: number; wrong: number }>;
+  dodge: number;
+};
+
+// LA regla de cuántas almas da (o quita) una respuesta, antes del suelo del
+// nivel. Lo que se aplica de verdad lo decide después applySoulsDelta.
+export function counterattackSouls(kind: CounterattackKind, outcome: AnswerOutcome): number {
+  if (outcome === "dodged") return COUNTERATTACK.dodge;
+  return COUNTERATTACK.souls[kind][outcome];
+}
+
 // ---------------------------------------------------------------------------
 //  La llama (racha diaria)
 // ---------------------------------------------------------------------------
@@ -270,6 +326,8 @@ export type Boss = {
   key: BossKey;
   // Tipo de criatura, tal como lo ve el usuario.
   name: string;
+  // Artículo para las frases: "La rata de las cloacas contraataca".
+  article: "El" | "La";
   // Punto de la ilustración que debe verse en la miniatura de la mazmorra
   // (object-position): el recorte deja fuera arriba y abajo, y así la cabeza
   // no se corta.
@@ -280,31 +338,37 @@ export const BESTIARY: Record<BossKey, Boss> = {
   "centinela-de-huesos": {
     key: "centinela-de-huesos",
     name: "Centinela de huesos",
+    article: "El",
     thumbPosition: "50% 30%",
   },
   "rata-de-las-cloacas": {
     key: "rata-de-las-cloacas",
     name: "Rata de las cloacas",
+    article: "La",
     thumbPosition: "50% 50%",
   },
   "ogro-de-las-ruinas": {
     key: "ogro-de-las-ruinas",
     name: "Ogro de las ruinas",
+    article: "El",
     thumbPosition: "50% 20%",
   },
   "caballero-hueco": {
     key: "caballero-hueco",
     name: "Caballero hueco",
+    article: "El",
     thumbPosition: "50% 10%",
   },
   "dragon-de-la-caverna": {
     key: "dragon-de-la-caverna",
     name: "Dragón de la caverna",
+    article: "El",
     thumbPosition: "50% 45%",
   },
   "liche-del-osario": {
     key: "liche-del-osario",
     name: "Liche del osario",
+    article: "El",
     thumbPosition: "50% 10%",
   },
 };

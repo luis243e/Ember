@@ -34,6 +34,11 @@
   --animate-fade-out: fade-out 1.2s ease-in forwards;
   /* El texto de victoria aparece cuando el jefe ya cayó. */
   --animate-reveal: reveal 0.6s ease-out 1s both;
+  /* El contraataque llega después del golpe: espera a que suban el "−100" y
+     el "+N almas" (1,2 s) y aparece subiendo un poco. */
+  --animate-counter-in: counter-in 0.4s ease-out 1.2s both;
+  /* Versión quieta para movimiento reducido: la misma espera, sin moverse. */
+  --animate-counter-in-still: reveal 1ms linear 1.2s both;
 
   @keyframes drift {
     to {
@@ -130,6 +135,17 @@
     }
     to {
       opacity: 1;
+    }
+  }
+
+  @keyframes counter-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 }

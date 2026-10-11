@@ -31,11 +31,12 @@ function shuffled<T>(items: readonly T[]): T[] {
 // - Si la materia no es del usuario (o no existe), lanza un error: quien la
 //   llame decide qué hacer (en una acción, notFound()).
 //
-// ⚠ Lo que devuelve lleva correctIndex y explanation. El paso 2 debe mandar
-//   al navegador una versión SIN esos dos campos (id, source, type, prompt y
-//   options) y comprobar la respuesta aquí, en el servidor: si la respuesta
-//   viajara antes de contestar, cualquiera podría leerla en las herramientas
-//   del navegador.
+// ⚠ Lo que devuelve lleva correctIndex y explanation. La batalla guarda solo
+//   la referencia (id o clave) en el contraataque y al navegador manda
+//   enunciado y opciones ya barajadas (publicQuestion en
+//   lib/questions/counterattack.ts); la respuesta se comprueba en el
+//   servidor. Si viajara antes de contestar, cualquiera podría leerla en las
+//   herramientas del navegador.
 //
 // TODO (paso 3, preguntas que vuelven): cambiar la prioridad usando
 //   QuestionAttempt, para que las falladas hace poco salgan antes que las
@@ -88,6 +89,6 @@ export async function preguntasParaContraataque(
   return elegidos.flatMap((id) => {
     const fila = porId.get(id);
     // Si alguien la borró entre las dos consultas, se salta.
-    return fila ? [fila] : [];
+    return fila ? [{ ...fila, key: null }] : [];
   });
 }

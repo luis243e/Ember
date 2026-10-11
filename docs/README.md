@@ -11,8 +11,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `main` se despliega solo.
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
-- **Base de datos:** 10 tablas (ver [Modelo de datos](#modelo-de-datos)),
-  creadas con 11 migraciones (la 10.ª y la 11.ª aún no están en producción).
+- **Base de datos:** 11 tablas (ver [Modelo de datos](#modelo-de-datos)),
+  creadas con 12 migraciones (la 12.ª, `20261011011609_contraataque`, solo
+  en la base local).
   RLS activado en todas, y en producción también en `_prisma_migrations` (a
   mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
@@ -25,8 +26,12 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261011001244_banco_preguntas` (10 oct en
-  Colombia, sin commit; solo en la base local): crea `Question` y
+- **Migraciones:** la última es `20261011011609_contraataque` (10 oct en
+  Colombia, sin commit; solo en la base local): crea `Counterattack` (con
+  `items` en `jsonb`, índice único en `studySessionId`, claves foráneas en
+  `Cascade` y RLS). Solo añade cosas. La anterior,
+  `20261011001244_banco_preguntas` (commit `b1593c8`; según Luis, el paso 1
+  ya está en producción): crea `Question` y
   `QuestionAttempt` con los enums `QuestionType` y `QuestionSource`, tres
   `CHECK` escritos a mano (que Prisma no gestiona) y RLS. Solo añade cosas.
   La anterior, `20261010214056_limite_correos_auth` (commit `b985a3e`), añade `User.lastAuthEmailAt` (opcional)
@@ -55,7 +60,22 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis; **antes del push hay que crear `GMAIL_USER` y
   `GMAIL_APP_PASSWORD` en Vercel**. Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
-- **Fase 2 · paso 1: banco de preguntas (10 oct, sin commit):**
+- **Fase 2 · paso 2: el contraataque (10 oct, sin commit):** después de un
+  golpe que no derrota al jefe, el jefe contraataca con hasta 3 preguntas de
+  su materia (`preguntasParaContraataque()`; genéricas si no tiene), una cada
+  vez y sin reloj, en un panel modal sobre la batalla (Figma 105:2, 105:77 y
+  105:157, sin la brasa). Opción múltiple +15 / −5, verdadero o falso
+  +10 / −10, genéricas +5 siempre, esquivar 0; lo que se resta nunca baja de
+  nivel ("0 almas · tu nivel te protege"). Al final, "Contraataque repelido /
+  resistido / te ha alcanzado", "X / N" y las almas. Todo el estado vive en
+  `Counterattack` (servidor): el navegador recibe solo enunciado y opciones
+  barajadas, nunca la correcta antes de contestar. Cada respuesta del banco
+  queda en `QuestionAttempt`. Recargar retoma la pregunta; una vigilia nueva
+  cierra el contraataque a medias. El núcleo de la batalla se movió a
+  `lib/battle.ts`. Probado en local (script de 77 comprobaciones y Chrome,
+  también a 320 px y el payload). Detalles en
+  [2026-10-10-contraataque.md](sesiones/2026-10-10-contraataque.md).
+- **Fase 2 · paso 1: banco de preguntas (10 oct, commit `b1593c8`):**
   `/materias/[id]` muestra el banco de preguntas de cada materia (opción
   múltiple o verdadero o falso), la más nueva primero, con la respuesta
   correcta, "Acertada X de Y veces", "Vuelve pronto" si el último intento
@@ -65,7 +85,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   estadísticas. Todo se valida en el servidor; máximo 200 por materia.
   `/materias` enlaza cada materia y dice "N preguntas". La función que dará
   las preguntas al combate, `preguntasParaContraataque()`
-  (`lib/questions/provider.ts`), ya existe pero no la usa ninguna pantalla:
+  (`lib/questions/provider.ts`), la usa desde el paso 2 el contraataque:
   al azar y sin repetir, o 10 preguntas genéricas de autoevaluación
   (`lib/questions/generic.ts`) si la materia no tiene. El contraataque en la
   batalla es el paso 2 y el agente, el paso 3. Probado en local (script de 48
@@ -155,13 +175,14 @@ migraciones, y el schema lo avisa con un comentario.
 
 | Tabla | Qué guarda | Relaciones |
 |---|---|---|
-| `User` | Usuario y su personaje: nivel, almas, llama, límite de correos | Tiene materias, vigilias, misiones, intentos, sesiones y cuentas |
+| `User` | Usuario y su personaje: nivel, almas, llama, límite de correos | Tiene materias, vigilias, misiones, intentos, contraataques, sesiones y cuentas |
 | `Subject` | Materia ("Cálculo") | De un `User`. Tiene jefes (`Task`) y preguntas (`Question`) |
 | `Task` | Jefe: vida, dificultad, fecha de entrega, estado, `bossKey` | De una `Subject` (no tiene `userId`: se filtra por la materia) |
 | `StudySession` | Vigilia de 25 min y sus almas | De una `Task` y de un `User`. Una sola abierta por usuario (índice parcial) |
 | `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo | De un `User` y una `Task`. Una sola `ACTIVE` por usuario (índice parcial) |
 | `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation` | De una `Subject` (`Cascade`). Tres `CHECK` a mano |
-| `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque: `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta`. La escribirá el paso 2 | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
+| `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque: `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta` (las aplicadas). La escribe `responderPreguntaDe` (`chosenIndex` en el orden ORIGINAL de la pregunta); las genéricas no | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
+| `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, y `order` = permutación de sus opciones), `answered`, `correctCount`, `soulsDelta`, `finishedAt` | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
 | `Session`, `Account`, `Verification` | Tablas de Better Auth (sesiones, contraseña, enlaces de verificación) | `Session` y `Account` de un `User` |
 
 Las preguntas genéricas de autoevaluación **no están en la base**: viven en
@@ -197,14 +218,15 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
 5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
    equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
    descarga la imagen. `docker compose ps` debe decir `healthy`.
-6. `npx prisma migrate deploy` crea las tablas aplicando las 11 migraciones.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 12 migraciones.
 7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
    `prueba1234`** (de desarrollo, no protege nada real) con 2 materias (5
    preguntas en Cálculo; Historia sin preguntas), 5 jefes en varios estados,
    almas y llama, y con el correo ya verificado. Se puede repetir: rehace la
    cuenta. Para comprobar el banco de preguntas:
    `node --env-file=.env --import ./scripts/alias-hooks.mjs scripts/probar-preguntas.ts`
-   (tiene que terminar en "Todo bien.").
+   (tiene que terminar en "Todo bien."); el contraataque, igual con
+   `scripts/probar-contraataque.ts`.
 8. `npm run dev` y abrir http://localhost:3000/login. Si con las variables de
    Gmail rellenas sale "unable to verify the first certificate", es un
    antivirus que intercepta el correo (en el portátil de Luis, Norton):
@@ -309,10 +331,41 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - **El combate pide preguntas SOLO a `preguntasParaContraataque()`**
   (`lib/questions/provider.ts`), nunca a la tabla `Question` directamente.
   Lo que devuelve lleva `correctIndex` y `explanation`: **al navegador solo
-  van `id`, `source`, `type`, `prompt` y `options`**, y la respuesta se
-  comprueba en el servidor.
+  van el tipo, el enunciado y las opciones ya barajadas** (`publicQuestion()`
+  en `lib/questions/counterattack.ts`), ni siquiera el id de la pregunta. La
+  correcta y la explicación solo viajan en la respuesta de
+  `responderPregunta`, DESPUÉS de contestar, y la respuesta se comprueba en
+  el servidor.
+- **El estado del contraataque vive solo en el servidor** (`Counterattack`):
+  qué preguntas salen (`items`), en qué orden se muestran sus opciones y por
+  cuál va. El navegador manda solo "contraataque, número de pregunta que veo,
+  opción mostrada (o `null` = esquivar)". Si el número no es el que toca, se
+  rechaza sin tocar nada (dos pestañas). Un contraataque por vigilia (índice
+  único en `studySessionId`).
+- **Las reglas del contraataque viven en `COUNTERATTACK` y
+  `counterattackSouls()`** (`lib/game.ts`): 3 preguntas; opción múltiple
+  +15 / −5; verdadero o falso +10 / −10; genéricas +5 siempre; esquivar 0. **Si
+  se cambian, contestar al azar tiene que seguir dando 0 de media** (¼·acierto
+  + ¾·fallo y ½·acierto + ½·fallo): `scripts/probar-contraataque.ts` lo
+  comprueba. Contestar no toca la llama ni la misión de redención.
+- **Las opciones de opción múltiple se barajan al crear el contraataque** con
+  `randomInt` de `node:crypto` y la permutación se guarda en `items`. En
+  `QuestionAttempt.chosenIndex` va siempre el índice ORIGINAL de la pregunta.
+  Verdadero o falso y las genéricas no se barajan.
+- **Cada genérica tiene una `key` estable** (`lib/questions/generic.ts`): un
+  contraataque guarda `generic:<key>`. No se cambian ni se reutilizan.
+- **`lib/battle.ts` es el corazón de la batalla y NUNCA se importa desde un
+  componente de cliente** (ni `lib/questions/counterattack.ts`, que usa
+  `node:crypto`). Sus funciones reciben el `userId` y confían en él: por eso
+  no van en el archivo `"use server"` (todo lo que exporta es una acción que
+  cualquiera puede llamar). Las acciones de `app/mazmorra/batalla/[id]/` son
+  la puerta: `requireUser()`, comprobar el dueño, llamar a `lib/battle.ts`
+  y `refresh()`.
 - **En las preguntas genéricas (`source: "GENERIC"`), cualquier respuesta da
-  las mismas almas y nunca resta:** su `correctIndex` no decide nada.
+  las mismas almas y nunca resta:** su `correctIndex` no decide nada. En el
+  resumen, una genérica contestada cuenta como acierto, pero **la brasa
+  (paso 4) NO puede ganarse con preguntas genéricas**: si no, una materia sin
+  preguntas daría brasa gratis.
 - **`source` de una pregunta lo pone siempre el servidor** (`MANUAL` al
   crear a mano; al editar no se toca).
 - **Las reglas del banco de preguntas viven en
@@ -326,10 +379,13 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - **Las tiradas al azar (almas) solo se hacen en el servidor, dentro de las
   acciones** (`rollStrikeSouls`, `rollVictorySouls`). Nunca en el cliente.
 - **El nivel se deduce siempre de `User.souls`** con `levelForSouls()`.
-  `User.souls` solo baja al caer ante un jefe, y solo hasta el umbral del
-  nivel actual (`fallPenalty()`), así que **el nivel nunca baja**.
-  `User.level` se escribe solo en `asestarGolpe`, en la misma transacción
-  que las almas; la pantalla no lo lee.
+  `User.souls` solo baja al caer ante un jefe (`fallPenalty()`) o al fallar
+  en un contraataque (`applySoulsDelta()`), y en los dos casos solo hasta el
+  umbral del nivel actual, así que **el nivel nunca baja**. `User.level` lo
+  escriben SOLO dos sitios, los dos con `levelForSouls()` y en la misma
+  transacción que las almas: el golpe (`asestarGolpeDe`) y la respuesta al
+  contraataque (`responderPreguntaDe`), los dos en `lib/battle.ts`. La
+  pantalla no lo lee.
 - **`LEVEL_COSTS` es fija: no se regenera.** Se generó una vez el 8 oct
   (cómo, en la nota de esa sesión). Cambiarla movería de nivel a todo el
   mundo.
@@ -343,13 +399,18 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   de `serverNow`, y nunca calcula la duración (la recibe como prop). Las
   acciones reciben solo el id de la tarea.
 - **En una transacción con bloqueos, todo bloquea en el mismo orden: tarea
-  → vigilia → usuario → misión de redención,** y cada fila se bloquea antes
-  de escribirla. La tarea, el usuario y la misión se leen con `SELECT … FOR
-  UPDATE` (`bloquearTarea`, `bloquearUsuario` y `bloquearMision` en las
-  acciones de la batalla). La vigilia se bloquea con su propio `UPDATE`
+  → vigilia → contraataque → usuario → misión de redención,** y cada fila se
+  bloquea antes de escribirla. La tarea, el contraataque, el usuario y la
+  misión se leen con `SELECT … FOR UPDATE` (`bloquearTarea`,
+  `bloquearContraataque`, `bloquearUsuario` y `bloquearMision` en
+  `lib/battle.ts`). La vigilia se bloquea con su propio `UPDATE`
   condicional, que toma el mismo bloqueo de fila y solo cambia una vigilia
-  abierta. La revisión de jefes vencidos sigue el mismo orden sin la
-  vigilia: tareas (ordenadas por id) → usuario → misión. Quien no necesite
+  abierta. Comenzar una vigilia cierra el contraataque a medias después de
+  crearla (tarea → vigilia → contraataque); contestar bloquea el contraataque
+  y después el usuario. El contraataque se CREA fuera de la transacción del
+  golpe, cuando el golpe ya cuenta. La revisión de jefes vencidos sigue el
+  mismo orden sin vigilia ni contraataque: tareas (ordenadas por id) →
+  usuario → misión. Quien no necesite
   alguna se la salta, pero nunca cambia el orden. Si no,
   dos peticiones simultáneas pueden esperarse la una a la otra para siempre
   (interbloqueo). Con la fila bloqueada se puede leer, calcular en el código
@@ -484,7 +545,11 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   correo, "Browser 2"). Trabajar solo en pestañas nuevas en `localhost`.
 - **En pruebas automáticas con Chrome, mirar `document.visibilityState`**
   antes de diagnosticar un "no responde": con la pestaña oculta, Chrome
-  frena temporizadores y pintado.
+  frena temporizadores y pintado (y no ejecuta `requestAnimationFrame` ni
+  anima). Si una pestaña no deja hacer capturas, abrir otra nueva. Si
+  `resize_window` no cambia el ancho, probar 320 px metiendo la página en un
+  `<iframe>` de 320 px (dentro, el viewport y las consultas de contenedor
+  ven 320).
 - **Los estilos base de `globals.css` solo tocan elementos sin clases**
   (`:not([class])`). Así las pantallas sin diseño se leen y las diseñadas no
   heredan nada inesperado.
@@ -536,11 +601,25 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   pantalla y en Safari y Firefox. Confirmar que llegaron a Gmail el aviso
   "Ya tienes una cuenta" (`+prueba2`) y el reenvío al entrar sin verificar
   (`+prueba1`).
-- [ ] **Fase 2 · paso 2 (contraataque):** usar `preguntasParaContraataque()`,
-  mandar al navegador las preguntas sin `correctIndex` ni `explanation`,
-  comprobar en el servidor, escribir `QuestionAttempt` (comprobando que
-  `chosenIndex` esté dentro de las opciones; el `CHECK` no puede) y, en las
-  genéricas, mismas almas para cualquier respuesta y nunca restar.
+- [ ] **Fase 2 · paso 4 (la brasa): la brasa NO puede ganarse con preguntas
+  genéricas; si no, una materia sin preguntas daría brasa gratis.** (Aviso
+  también en `lib/questions/counterattack.ts`.) La píldora del resumen
+  (Figma 105:157) todavía no está.
+- [ ] Contraataque: probarlo en Vercel (latencia de contestar contra
+  Supabase), con lector de pantalla, con movimiento reducido real (la espera
+  de 1,2 s no se vio animada: la pestaña de Chrome estaba oculta) y en Safari
+  y Firefox. Después del push, mirar que el build aplica
+  `20261011011609_contraataque`.
+- [ ] Contraataque a medias de un jefe que después cae por fecha: no se ve
+  (su batalla redirige a la mazmorra) hasta que la vigilia siguiente lo
+  cierra. Decidir si enseñarlo en otro sitio.
+- [ ] Si otra pestaña empieza una vigilia justo entre un golpe y la creación
+  de su contraataque, ese contraataque queda abierto hasta la vigilia
+  siguiente (sin consecuencias: solo da sus preguntas).
+- [ ] En el portátil de Luis, abrir una conexión nueva a la base local tarda
+  ~2 s (dos transacciones a la vez daban `P2028`; responder usa ahora
+  `maxWait: 10_000`). Si molesta, probar `127.0.0.1` en vez de `localhost`
+  en el `.env` local.
 - [ ] **Fase 2 · paso 3:** el agente (`source: AGENT`) y la prioridad de las
   preguntas que vuelven (`QuestionAttempt`).
 - [ ] Decidir si editar una pregunta del agente la convierte en `MANUAL`
@@ -609,6 +688,9 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base de producción se recrea, volver a activar a mano el RLS de
   `_prisma_migrations` (en la local no hace falta: no tiene API pública).
+- [x] ~~Fase 2 · paso 2: el contraataque~~ (10 oct, sin commit): preguntas
+  después del golpe, estado en `Counterattack`, `QuestionAttempt` (con
+  `chosenIndex` comprobado dentro de las opciones), genéricas sin restar.
 - [x] ~~Activar la verificación de correo~~ (10 oct, sin commit): enlace al
   registrarse y al entrar sin verificar, entrada automática al abrirlo y
   sesiones sin verificar fuera.
@@ -686,3 +768,4 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-10 | Bases separadas: Postgres 17 en Docker para desarrollo, seed con cuenta de prueba, migraciones de producción en el build de Vercel | [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md) |
 | 2026-10-10 | Verificación de correo (Gmail por SMTP, enlace con entrada automática, límite por cuenta, enumeración cerrada, Norton y el puerto 587) | [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md) |
 | 2026-10-10 | Fase 2 · paso 1: banco de preguntas (`Question`, `QuestionAttempt`, enums, `String[]`, `CHECK` a mano), `/materias/[id]`, proveedor único y preguntas genéricas | [2026-10-10-banco-de-preguntas.md](sesiones/2026-10-10-banco-de-preguntas.md) |
+| 2026-10-10 | Fase 2 · paso 2: el contraataque (`Counterattack` con `items` en `jsonb`, permutación con `node:crypto`, valor esperado 0, índice único por vigilia, orden de bloqueos ampliado, `lib/battle.ts`, panel modal accesible) | [2026-10-10-contraataque.md](sesiones/2026-10-10-contraataque.md) |

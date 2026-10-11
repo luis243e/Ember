@@ -46,8 +46,9 @@ export type RedemptionNotice =
 // Marca FAILED los jefes vivos del usuario cuyo día de entrega ya terminó,
 // cobra el castigo y resuelve la misión que toque. Todo en UNA transacción.
 //
-// Orden de bloqueo: tareas → usuario → misión. Es el mismo que el de
-// asestarGolpe (tarea → vigilia → usuario → misión) sin la vigilia, así que
+// Orden de bloqueo: tareas → usuario → misión. Es el mismo que el de la
+// batalla (tarea → vigilia → contraataque → usuario → misión, ver
+// lib/battle.ts) sin la vigilia ni el contraataque, así que
 // la revisión y un golpe simultáneos se ponen en fila en vez de bloquearse el
 // uno al otro. Las tareas se bloquean por id: dos revisiones a la vez (dos
 // pestañas) las piden en el mismo orden.

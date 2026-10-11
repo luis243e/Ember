@@ -20,6 +20,7 @@ import {
   type ResultadoBatalla,
 } from "./actions";
 import { formatCountdown } from "./countdown";
+import { CounterattackPanel, type CounterattackData } from "./counterattack-panel";
 
 type BatallaProps = {
   task: {
@@ -31,7 +32,7 @@ type BatallaProps = {
     currentHp: number;
     status: TaskStatus;
   };
-  boss: { name: string; src: string };
+  boss: { name: string; article: "El" | "La"; src: string };
   // Vigilia abierta contra ESTE jefe (endsAt en milisegundos), o null.
   vigil: { endsAt: number } | null;
   // Vigilia abierta contra OTRO jefe, o null. Las dos no pueden darse a la vez.
@@ -41,6 +42,9 @@ type BatallaProps = {
   summary: { vigils: number; minutes: number };
   // Almas guardadas del golpe final y de la victoria, o null.
   reward: { strikeSouls: number; victorySouls: number } | null;
+  // Contraataque sin terminar contra este jefe (solo lo que puede verse antes
+  // de contestar), o null.
+  counterattack: CounterattackData | null;
 };
 
 // idle = sin vigilia; running = vigilia en curso; ready = cumplida, falta el
@@ -71,6 +75,7 @@ export function Batalla({
   serverNow,
   summary,
   reward,
+  counterattack,
 }: BatallaProps) {
   // Hora actual, siempre en la escala del SERVIDOR. Empieza en serverNow para
   // que el primer pintado del navegador coincida con el del servidor.
@@ -93,6 +98,9 @@ export function Batalla({
   const [hitting, setHitting] = useState(false);
   const [justDefeated, setJustDefeated] = useState(false);
   const paused = useSyncExternalStore(subscribePause, readPause, () => false);
+  // El panel del contraataque está abierto: la batalla de detrás queda inerte
+  // (ni el ratón, ni el Tab, ni el lector de pantalla llegan a ella).
+  const [panelOpen, setPanelOpen] = useState(false);
 
   const endsAt = vigil?.endsAt ?? null;
   // Tras un refresh llega un serverNow más reciente que el último tic.
@@ -150,6 +158,15 @@ export function Batalla({
     else if (wasConfirming.current) mainButtonRef.current?.focus();
     wasConfirming.current = showConfirm;
   }, [showConfirm]);
+
+  // Al cerrar el panel del contraataque, el foco vuelve al botón principal
+  // (si no, se quedaría en <body>). En un efecto: corre cuando la batalla ya
+  // ha dejado de ser inerte (antes, focus() no haría nada).
+  const panelWasOpen = useRef(false);
+  useEffect(() => {
+    if (panelWasOpen.current && !panelOpen) mainButtonRef.current?.focus();
+    panelWasOpen.current = panelOpen;
+  }, [panelOpen]);
 
   // Llama a una acción con solo el id de la tarea. La acción ya vuelve a
   // pintar la página (refresh), así que aquí solo hay mensajes y animación.
@@ -222,7 +239,7 @@ export function Batalla({
     // @container: los puntos de corte de esta pantalla miran su ancho.
     <div className="@container flex flex-1 flex-col">
       {/* Barra superior: sin barra lateral, es una pantalla de concentración. */}
-      <header className="flex h-14 items-center justify-between gap-3 px-2 @2xl:h-16 @2xl:border-b @2xl:border-line @2xl:px-10">
+      <header inert={panelOpen} className="flex h-14 items-center justify-between gap-3 px-2 @2xl:h-16 @2xl:border-b @2xl:border-line @2xl:px-10">
         <Link
           href="/mazmorra"
           className={cn(
@@ -260,7 +277,7 @@ export function Batalla({
         </div>
       </header>
 
-      <main className="flex flex-1 flex-col @2xl:items-center @2xl:justify-center @2xl:gap-4 @2xl:px-6 @2xl:py-8">
+      <main inert={panelOpen} className="flex flex-1 flex-col @2xl:items-center @2xl:justify-center @2xl:gap-4 @2xl:px-6 @2xl:py-8">
         {/* Escena. En escritorio es un marco 16:9 con todo encima; en móvil,
             la imagen arriba y el resto debajo. El ancho máximo hace que quepa
             entera en la ventana sin desplazarse. */}
@@ -521,6 +538,14 @@ export function Batalla({
           </div>
         )}
       </main>
+
+      {/* El contraataque: después de un golpe que no derrota al jefe. */}
+      <CounterattackPanel
+        counterattack={counterattack}
+        boss={boss}
+        afterStrike={strikes > 0}
+        onOpenChange={setPanelOpen}
+      />
 
       {/* Región viva: anuncia los cambios de estado al lector de pantalla. */}
       <p role="status" className="sr-only">

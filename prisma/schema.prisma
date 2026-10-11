@@ -160,6 +160,9 @@ model User {
 
   // Respuestas del usuario a las preguntas de los contraataques.
   questionAttempts QuestionAttempt[]
+
+  // Contraataques del usuario: como mucho uno por vigilia.
+  counterattacks Counterattack[]
 }
 
 
@@ -377,6 +380,10 @@ model StudySession {
   // Preguntas contestadas en los contraataques de esta vigilia.
   questionAttempts QuestionAttempt[]
 
+  // El contraataque que provocó el golpe de esta vigilia (o ninguno, si el
+  // golpe derrotó al jefe o la vigilia sigue abierta).
+  counterattack   Counterattack?
+
   // Índice para buscar rápido las sesiones de una tarea.
   @@index([taskId])
   // Y las de un usuario (lo usa también el borrado en cascada del usuario).
@@ -500,4 +507,52 @@ model QuestionAttempt {
   // vuelven) y todos los de una pregunta (borrado en cascada).
   @@index([userId, questionId])
   @@index([questionId])
+}
+
+
+// ========== CONTRAATAQUE ==========
+// Después de un golpe que NO derrota al jefe, el jefe contraataca con hasta 3
+// preguntas. Todo el estado vive aquí, en el servidor: qué preguntas salen, en
+// qué orden se muestran sus opciones y por cuál va. El navegador solo envía
+// "contesto la pregunta N con la opción X" (reglas en lib/game.ts y
+// lib/battle.ts).
+model Counterattack {
+  id             String        @id @default(cuid())
+
+  // La vigilia cuyo golpe lo provocó. @unique: UN contraataque por vigilia, así
+  // que repetir el golpe (o la creación) no da preguntas ni almas de más.
+  studySessionId String        @unique
+  studySession   StudySession  @relation(fields: [studySessionId], references: [id], onDelete: Cascade)
+
+  // Dueño. Se repite aquí (la vigilia ya lo tiene) para comprobarlo sin unir
+  // tablas y para buscar rápido su contraataque sin terminar.
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Json = un valor JSON cualquiera (Postgres jsonb). Aquí, una lista con una
+  // entrada por pregunta, en el orden en que salen:
+  //   { "ref": "<id de Question>" | "generic:<clave>", "order": [2, 0, 3, 1] }
+  // order es la permutación de las opciones: la opción que se MUESTRA en la
+  // posición i es la opción order[i] de la pregunta. Como Json acepta
+  // cualquier cosa, se valida SIEMPRE al leerlo (parseItems en
+  // lib/questions/counterattack.ts).
+  items          Json
+
+  // Preguntas ya contestadas (o esquivadas, o saltadas). La que toca es
+  // items[answered].
+  answered       Int           @default(0)
+
+  // Aciertos (una genérica contestada cuenta como acierto; esquivar, nunca).
+  correctCount   Int           @default(0)
+
+  // Almas ganadas o perdidas en total, las que de verdad se aplicaron.
+  soulsDelta     Int           @default(0)
+
+  // Cuándo terminó: al contestar la última, o al empezar otra vigilia con
+  // este sin terminar (las que faltaban no cuentan). null = en curso.
+  finishedAt     DateTime?
+
+  createdAt      DateTime      @default(now())
+
+  @@index([userId])
 }
