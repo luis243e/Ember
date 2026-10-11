@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { BookOpen } from "lucide-react";
+import Link from "next/link";
+import { BookOpen, ChevronRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { loadRedemption } from "@/lib/redemption";
@@ -7,6 +8,7 @@ import { AppShell } from "@/components/app/app-shell";
 import { cardStyles } from "@/components/ui/card";
 import { Eyebrow } from "@/components/ui/eyebrow";
 import { cn } from "@/lib/cn";
+import { formatNumber } from "@/lib/text";
 import { NuevaMateriaForm } from "./nueva-materia-form";
 
 export const metadata: Metadata = {
@@ -24,7 +26,8 @@ export default async function MateriasPage() {
     prisma.subject.findMany({
       where: { userId: sessionUser.id },
       orderBy: { name: "asc" },
-      select: { id: true, name: true },
+      // _count: cuántas preguntas tiene cada una, contadas por la base.
+      select: { id: true, name: true, _count: { select: { questions: true } } },
     }),
   ]);
 
@@ -49,18 +52,32 @@ export default async function MateriasPage() {
             </p>
           ) : (
             // divide-y: una línea entre cada materia, sin la de la última.
-            <ul className={cn(cardStyles, "divide-y divide-line")}>
-              {subjects.map((subject) => (
-                <li
-                  key={subject.id}
-                  className="flex items-center gap-3 px-5 py-4 text-[15px] leading-[normal] text-parchment"
-                >
-                  <BookOpen aria-hidden size={18} className="shrink-0 text-smoke" />
-                  {/* min-w-0 + wrap-anywhere: un nombre largo y sin espacios
-                      se parte en varias líneas dentro de la tarjeta. */}
-                  <span className="min-w-0 wrap-anywhere">{subject.name}</span>
-                </li>
-              ))}
+            // overflow-hidden: el fondo al pasar el ratón respeta las
+            // esquinas redondeadas (el foco va por dentro, -outline-offset).
+            <ul className={cn(cardStyles, "divide-y divide-line overflow-hidden")}>
+              {subjects.map((subject) => {
+                const count = subject._count.questions;
+                return (
+                  <li key={subject.id}>
+                    {/* La fila entera lleva a la página de la materia (su
+                        banco de preguntas). */}
+                    <Link
+                      href={`/materias/${subject.id}`}
+                      className="flex min-h-14 items-center gap-3 px-5 py-4 text-[15px] leading-[normal] text-parchment transition-colors hover:bg-night-alt focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold-bright"
+                    >
+                      <BookOpen aria-hidden size={18} className="shrink-0 text-smoke" />
+                      {/* min-w-0 + wrap-anywhere: un nombre largo y sin
+                          espacios se parte en varias líneas dentro de la
+                          tarjeta. */}
+                      <span className="min-w-0 flex-1 wrap-anywhere">{subject.name}</span>
+                      <span className="shrink-0 text-[13px] text-smoke">
+                        {count === 1 ? "1 pregunta" : `${formatNumber(count)} preguntas`}
+                      </span>
+                      <ChevronRight aria-hidden size={16} className="shrink-0 text-smoke" />
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

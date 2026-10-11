@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookOpen, LogOut, Swords, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BookOpen, LogOut, Swords, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cerrarSesion } from "@/app/mazmorra/actions";
 import { CharacterCard, type CharacterUser } from "@/components/app/character-card";
@@ -32,6 +32,9 @@ type AppShellProps = {
   // Cabecera de la página: título (h1) y subtítulo.
   title: string;
   description: string;
+  // Enlace opcional para volver, encima del título (por ejemplo,
+  // "← Mis materias" en la página de una materia).
+  back?: { href: string; label: string };
   // Avisos de la caída y de la misión de redención, de loadRedemption().
   notices: RedemptionNoticeData[];
   children: ReactNode;
@@ -47,6 +50,7 @@ export function AppShell({
   user,
   title,
   description,
+  back,
   notices,
   children,
 }: AppShellProps) {
@@ -152,6 +156,18 @@ export function AppShell({
           aparecería scroll horizontal. */}
       <main className="min-w-0 flex-1">
         <div className="flex flex-col gap-1.5 px-4 pt-6 md:border-b md:border-line md:px-8 md:py-7 lg:px-12">
+          {back && (
+            <Link
+              href={back.href}
+              className={cn(
+                "mb-1 flex items-center gap-1.5 self-start rounded-sm text-sm leading-[normal] text-ash transition-colors hover:text-parchment",
+                FOCUS_RING,
+              )}
+            >
+              <ArrowLeft aria-hidden size={14} />
+              {back.label}
+            </Link>
+          )}
           {/* wrap-anywhere: un nombre de usuario largo y sin espacios se
               parte en varias líneas en vez de desbordar. */}
           <h1 className="font-display text-[22px] leading-[normal] font-bold wrap-anywhere text-parchment md:text-[26px]">

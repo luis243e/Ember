@@ -11,10 +11,10 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `main` se despliega solo.
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
-- **Base de datos:** 8 tablas (`User`, `Subject`, `Task`, `StudySession`,
-  `RedemptionMission`, `Session`, `Account`, `Verification`), creadas con 10
-  migraciones (la 10.ª aún no está en producción). RLS activado en todas, y
-  en producción también en `_prisma_migrations` (a mano).
+- **Base de datos:** 10 tablas (ver [Modelo de datos](#modelo-de-datos)),
+  creadas con 11 migraciones (la 10.ª y la 11.ª aún no están en producción).
+  RLS activado en todas, y en producción también en `_prisma_migrations` (a
+  mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
   commit `b805759`):** desarrollo usa
   un Postgres 17 en Docker en cada equipo (`docker-compose.yml`, puerto 5433),
@@ -25,8 +25,11 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261010214056_limite_correos_auth` (10 oct,
-  sin commit; solo en la base local): añade `User.lastAuthEmailAt` (opcional)
+- **Migraciones:** la última es `20261011001244_banco_preguntas` (10 oct en
+  Colombia, sin commit; solo en la base local): crea `Question` y
+  `QuestionAttempt` con los enums `QuestionType` y `QuestionSource`, tres
+  `CHECK` escritos a mano (que Prisma no gestiona) y RLS. Solo añade cosas.
+  La anterior, `20261010214056_limite_correos_auth` (commit `b985a3e`), añade `User.lastAuthEmailAt` (opcional)
   y `User.authEmailCount` (por defecto 0). Será la primera que aplique de
   verdad el build de Vercel. La última ya aplicada en producción (8 oct) es
   `20261008222051_redencion`: crea `RedemptionMission` (con su RLS y un
@@ -52,6 +55,22 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis; **antes del push hay que crear `GMAIL_USER` y
   `GMAIL_APP_PASSWORD` en Vercel**. Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
+- **Fase 2 · paso 1: banco de preguntas (10 oct, sin commit):**
+  `/materias/[id]` muestra el banco de preguntas de cada materia (opción
+  múltiple o verdadero o falso), la más nueva primero, con la respuesta
+  correcta, "Acertada X de Y veces", "Vuelve pronto" si el último intento
+  falló, "Del agente", y Editar y Borrar (con confirmación en la propia
+  tarjeta). Un bloque plegable "Añadir pregunta a mano" crea y edita
+  (`?editar=<id>`); cambiar tipo, enunciado, opciones o correcta reinicia las
+  estadísticas. Todo se valida en el servidor; máximo 200 por materia.
+  `/materias` enlaza cada materia y dice "N preguntas". La función que dará
+  las preguntas al combate, `preguntasParaContraataque()`
+  (`lib/questions/provider.ts`), ya existe pero no la usa ninguna pantalla:
+  al azar y sin repetir, o 10 preguntas genéricas de autoevaluación
+  (`lib/questions/generic.ts`) si la materia no tiene. El contraataque en la
+  batalla es el paso 2 y el agente, el paso 3. Probado en local (script de 48
+  comprobaciones y Chrome, también a 320 px). Detalles en
+  [2026-10-10-banco-de-preguntas.md](sesiones/2026-10-10-banco-de-preguntas.md).
 - **Fase 1 en curso:** `/materias` (protegida) permite crear materias y ver
   la lista propia, ordenada por nombre. `/mazmorra/invocar` crea jefes
   (nombre, materia, fecha de entrega y dificultad) y `/mazmorra` lista los
@@ -128,6 +147,26 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   tarjeta ya muestra la miniatura real.) El formulario de materias ya
   conserva lo escrito si hay error.
 
+## Modelo de datos
+
+Todo en `prisma/schema.prisma` (comentado línea por línea). Lo que Prisma no
+sabe escribir ahí (índices únicos parciales y `CHECK`) va a mano en las
+migraciones, y el schema lo avisa con un comentario.
+
+| Tabla | Qué guarda | Relaciones |
+|---|---|---|
+| `User` | Usuario y su personaje: nivel, almas, llama, límite de correos | Tiene materias, vigilias, misiones, intentos, sesiones y cuentas |
+| `Subject` | Materia ("Cálculo") | De un `User`. Tiene jefes (`Task`) y preguntas (`Question`) |
+| `Task` | Jefe: vida, dificultad, fecha de entrega, estado, `bossKey` | De una `Subject` (no tiene `userId`: se filtra por la materia) |
+| `StudySession` | Vigilia de 25 min y sus almas | De una `Task` y de un `User`. Una sola abierta por usuario (índice parcial) |
+| `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo | De un `User` y una `Task`. Una sola `ACTIVE` por usuario (índice parcial) |
+| `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation` | De una `Subject` (`Cascade`). Tres `CHECK` a mano |
+| `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque: `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta`. La escribirá el paso 2 | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
+| `Session`, `Account`, `Verification` | Tablas de Better Auth (sesiones, contraseña, enlaces de verificación) | `Session` y `Account` de un `User` |
+
+Las preguntas genéricas de autoevaluación **no están en la base**: viven en
+`lib/questions/generic.ts`.
+
 ## Cómo arrancar en un equipo nuevo
 
 > **⚠️ Si este equipo ya tenía un `.env` de antes del 10 oct, apunta a
@@ -158,11 +197,14 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
    equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
    descarga la imagen. `docker compose ps` debe decir `healthy`.
-6. `npx prisma migrate deploy` crea las tablas aplicando las 10 migraciones.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 11 migraciones.
 7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
-   `prueba1234`** (de desarrollo, no protege nada real) con 2 materias, 5
-   jefes en varios estados, almas y llama, y con el correo ya verificado. Se
-   puede repetir: rehace la cuenta.
+   `prueba1234`** (de desarrollo, no protege nada real) con 2 materias (5
+   preguntas en Cálculo; Historia sin preguntas), 5 jefes en varios estados,
+   almas y llama, y con el correo ya verificado. Se puede repetir: rehace la
+   cuenta. Para comprobar el banco de preguntas:
+   `node --env-file=.env --import ./scripts/alias-hooks.mjs scripts/probar-preguntas.ts`
+   (tiene que terminar en "Todo bien.").
 8. `npm run dev` y abrir http://localhost:3000/login. Si con las variables de
    Gmail rellenas sale "unable to verify the first certificate", es un
    antivirus que intercepta el correo (en el portátil de Luis, Norton):
@@ -228,13 +270,23 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   contenedor (`docker exec ember-db psql -U ember -d ember -c "create database ember_shadow_check"`)
   y se borra después con `drop database`. Prisma 6.19.3 ignora los índices
   parciales.
-- **El seed (`prisma/seed.ts`) solo corre contra `localhost`:** antes de
-  conectarse comprueba el host de `DATABASE_URL` y `DIRECT_URL` y, si no es
-  local, se niega. No quitar esa comprobación.
+- **Los scripts que escriben en la base (el seed, `scripts/probar-preguntas.ts`)
+  solo corren contra `localhost`:** antes de conectarse llaman a
+  `assertLocalDatabase()` (`scripts/local-only.ts`), que comprueba el host de
+  `DATABASE_URL` y `DIRECT_URL` y, si no es local, se niega. No quitar esa
+  comprobación; un script nuevo que escriba en la base también la usa, antes
+  de importar `lib/prisma`.
+- **Los `CHECK` van a mano en la migración** (Prisma 6 no los gestiona: no
+  están en `schema.prisma`, no provocan *drift* y Prisma nunca los crea ni
+  los borra). Se avisa con un comentario en el modelo y en el SQL. Ojo: Prisma
+  crea `String[]` sin `NOT NULL`, y un `CHECK` con resultado `NULL` pasa;
+  hay que escribir `IS NOT NULL`.
 - **Los scripts en TypeScript se ejecutan con `node`, sin dependencias**
   (Node 24 entiende TypeScript): `node --env-file=.env --import ./scripts/alias-hooks.mjs <script>.ts`.
   `alias-hooks.mjs` traduce `@/` como `tsconfig.json`, para reutilizar
-  `lib/`.
+  `lib/`. Por eso **todos los imports del proyecto van con `@/`**, también
+  entre archivos de la misma carpeta: un import relativo sin extensión
+  (`./generic`) rompe los scripts.
 - **El SQL a mano va siempre con `$queryRaw`/`$executeRaw` de plantilla**
   (parametrizado), nunca con `$queryRawUnsafe`.
 - **Toda tabla nueva lleva su migración de RLS.** Así la API pública de
@@ -254,6 +306,18 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - **`Task` no tiene `userId`: los jefes se filtran siempre a través de la
   materia** (`subject: { userId: user.id }`), y al crear uno se comprueba en
   el servidor que la materia sea del usuario.
+- **El combate pide preguntas SOLO a `preguntasParaContraataque()`**
+  (`lib/questions/provider.ts`), nunca a la tabla `Question` directamente.
+  Lo que devuelve lleva `correctIndex` y `explanation`: **al navegador solo
+  van `id`, `source`, `type`, `prompt` y `options`**, y la respuesta se
+  comprueba en el servidor.
+- **En las preguntas genéricas (`source: "GENERIC"`), cualquier respuesta da
+  las mismas almas y nunca resta:** su `correctIndex` no decide nada.
+- **`source` de una pregunta lo pone siempre el servidor** (`MANUAL` al
+  crear a mano; al editar no se toca).
+- **Las reglas del banco de preguntas viven en
+  `lib/questions/validation.ts`** (límites, etiquetas y `validarPregunta`),
+  y se validan siempre en el servidor.
 - **Las reglas del juego solo viven en `lib/game.ts`.** La vida se calcula en
   el servidor a partir de la dificultad, nunca se lee del formulario. El jefe
   de una tarea se lee **siempre** con `bossForTask()`: `bossKey` es
@@ -290,6 +354,11 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   dos peticiones simultáneas pueden esperarse la una a la otra para siempre
   (interbloqueo). Con la fila bloqueada se puede leer, calcular en el código
   y escribir sin `increment`: nadie más la cambia hasta el final.
+  **`Subject` solo lo bloquean las acciones del banco de preguntas; nunca
+  dentro de la cadena de la batalla** (`crearPregunta` lo bloquea para contar
+  hasta 200). Lo mismo con `Question` (`editarPregunta`). Si algún día la
+  batalla necesita bloquear una de las dos, hay que meterla en la cadena y
+  revisar el orden en los dos lados.
 - **Transacciones cortas:** se lee con el mismo `SELECT … FOR UPDATE` lo que
   haga falta de la fila bloqueada, se calcula en el código y se escribe una
   sola vez. Cada ida y vuelta a la base alarga el bloqueo (contra la base
@@ -332,6 +401,13 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   de validarlos. Materias admite 60 caracteres y jefes 80.
 - **Para conservar un `<select>` tras un error, ponle `key` con su valor.**
   React solo aplica el `defaultValue` de un select al montarlo.
+- **En un formulario con `useActionState`, los campos van no controlados**
+  (`defaultValue`, `defaultChecked`). Al terminar la acción React reinicia el
+  formulario, y un campo controlado cuyo estado no cambió se queda con el
+  valor del reinicio (pasó con los radios del tipo de pregunta).
+- **Con grupos de Tailwind anidados, grupos con nombre** (`group/bloque`,
+  `group-has-checked/opcion:`). Un `group-has-checked:` sin nombre se cumple
+  si cualquier ancestro `group` contiene algo marcado.
 - **Código en inglés, comentarios en español.** Los componentes genéricos de
   `components/ui/` también van en inglés (`Card`, `ButtonLink`); los de
   dominio pueden ir en español (`NuevaMateriaForm`).
@@ -400,6 +476,12 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   (`animationPlayState`): una clase pierde ante el atajo.
 - **Un botón con el foco no pasa a `disabled` mientras espera una
   respuesta,** porque perdería el foco: `aria-disabled` y se ignora el clic.
+- **Antes de automatizar con Chrome, comprobar que el navegador es el de
+  este equipo:** abrir `localhost:3000/login?marca=<texto único>` y buscar la
+  marca en el log de `npm run dev`. Si no llega, ese Chrome es el del otro
+  equipo: parar. Con dos conectados, cada uno es el de un equipo (en el de
+  la sesión del banco de preguntas, "Browser 1"; en el de la verificación de
+  correo, "Browser 2"). Trabajar solo en pestañas nuevas en `localhost`.
 - **En pruebas automáticas con Chrome, mirar `document.visibilityState`**
   antes de diagnosticar un "no responde": con la pestaña oculta, Chrome
   frena temporizadores y pintado.
@@ -454,10 +536,21 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   pantalla y en Safari y Firefox. Confirmar que llegaron a Gmail el aviso
   "Ya tienes una cuenta" (`+prueba2`) y el reenvío al entrar sin verificar
   (`+prueba1`).
-- [ ] Chrome (la extensión de Claude): con dos navegadores conectados,
-  "Browser 1" no llega a `localhost:3000` y "Browser 2" sí (sesión de la
-  verificación de correo). Falta mirar con el navegador las pantallas de
-  la fase 1 contra la base local.
+- [ ] **Fase 2 · paso 2 (contraataque):** usar `preguntasParaContraataque()`,
+  mandar al navegador las preguntas sin `correctIndex` ni `explanation`,
+  comprobar en el servidor, escribir `QuestionAttempt` (comprobando que
+  `chosenIndex` esté dentro de las opciones; el `CHECK` no puede) y, en las
+  genéricas, mismas almas para cualquier respuesta y nunca restar.
+- [ ] **Fase 2 · paso 3:** el agente (`source: AGENT`) y la prioridad de las
+  preguntas que vuelven (`QuestionAttempt`).
+- [ ] Decidir si editar una pregunta del agente la convierte en `MANUAL`
+  (hoy sigue siendo `AGENT`).
+- [ ] Banco de preguntas: probar el máximo de 200 con envíos simultáneos,
+  con lector de pantalla y en Safari y Firefox; después del push, mirar que
+  el build aplica `20261011001244_banco_preguntas` y probarlo en producción.
+- [ ] Falta mirar con el navegador las pantallas de la fase 1 contra la base
+  local (en el equipo donde "Browser 1" llega a `localhost`, ya se pueden
+  automatizar).
 - [ ] Probar la redención en Vercel (medir la carga de `/mazmorra`: hace 4
   consultas en paralelo), con lector de pantalla y en Safari y Firefox.
 - [ ] Golpe a un jefe vencido que no muere (vigilia que cruzó la
@@ -592,3 +685,4 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-08 | Fase 1: jefes vencidos y misión de redención (revisión al cargar, castigo una sola vez, `RedemptionMission` con índice único parcial, tarjeta y avisos) | [2026-10-08-redencion.md](sesiones/2026-10-08-redencion.md) |
 | 2026-10-10 | Bases separadas: Postgres 17 en Docker para desarrollo, seed con cuenta de prueba, migraciones de producción en el build de Vercel | [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md) |
 | 2026-10-10 | Verificación de correo (Gmail por SMTP, enlace con entrada automática, límite por cuenta, enumeración cerrada, Norton y el puerto 587) | [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md) |
+| 2026-10-10 | Fase 2 · paso 1: banco de preguntas (`Question`, `QuestionAttempt`, enums, `String[]`, `CHECK` a mano), `/materias/[id]`, proveedor único y preguntas genéricas | [2026-10-10-banco-de-preguntas.md](sesiones/2026-10-10-banco-de-preguntas.md) |

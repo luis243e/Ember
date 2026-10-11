@@ -62,6 +62,18 @@ enum RedemptionStatus {
   LOST       // volviste a caer antes de cumplirla: las almas se perdieron
 }
 
+// Tipo de una pregunta del banco (reglas en lib/questions/validation.ts).
+enum QuestionType {
+  MULTIPLE_CHOICE  // opción múltiple: exactamente 4 opciones
+  TRUE_FALSE       // verdadero o falso: opciones fijas ["Verdadero", "Falso"]
+}
+
+// Quién escribió la pregunta. Lo pone SIEMPRE el servidor, nunca el formulario.
+enum QuestionSource {
+  MANUAL  // el usuario, a mano, en /materias/[id]
+  AGENT   // el agente que genera preguntas desde los apuntes (Fase 2, paso 3)
+}
+
 
 // -----------------------------------------------------------------------------
 //  MODELOS: cada "model" se convierte en una TABLA de Postgres.
@@ -145,6 +157,9 @@ model User {
   // Misiones de redención del usuario: la activa (como mucho una) y las ya
   // resueltas, que se guardan para los avisos y como historial.
   redemptionMissions RedemptionMission[]
+
+  // Respuestas del usuario a las preguntas de los contraataques.
+  questionAttempts QuestionAttempt[]
 }
 
 
@@ -260,6 +275,9 @@ model Subject {
   // Una materia tiene MUCHAS tareas (lado "lista" de la relación).
   tasks  Task[]
 
+  // Y su banco de preguntas, con las que contraatacan sus jefes.
+  questions Question[]
+
   // @@index (doble @ = afecta a toda la tabla) crea un índice sobre userId.
   // Un índice es como el índice de un libro: hace muy rápido buscar
   // "todas las materias del usuario X". Postgres no lo crea solo.
@@ -356,6 +374,9 @@ model StudySession {
   // null = sigue abierta, o se cumplió antes de que existieran las almas.
   soulsEarned     Int?
 
+  // Preguntas contestadas en los contraataques de esta vigilia.
+  questionAttempts QuestionAttempt[]
+
   // Índice para buscar rápido las sesiones de una tarea.
   @@index([taskId])
   // Y las de un usuario (lo usa también el borrado en cascada del usuario).
@@ -402,4 +423,81 @@ model RedemptionMission {
 
   @@index([userId])
   @@index([taskId])
+}
+
+
+// ========== PREGUNTA (BANCO DE PREGUNTAS) ==========
+// Las preguntas de una materia, con las que sus jefes contraatacan. El combate
+// las pide SOLO a través de preguntasParaContraataque() (lib/questions/provider.ts).
+// La migración 20261011001244_banco_preguntas añade a mano tres CHECK que
+// Prisma no gestiona (número de opciones según el tipo y rangos de
+// correctIndex y QuestionAttempt.chosenIndex): no los busques aquí.
+model Question {
+  id           String         @id @default(cuid())
+
+  // Materia a la que pertenece. Si se borra la materia, se borran sus preguntas.
+  subjectId    String
+  subject      Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  type         QuestionType
+
+  // MANUAL salvo que la cree el agente. Nunca sale del formulario.
+  source       QuestionSource @default(MANUAL)
+
+  // Enunciado: de 1 a 500 caracteres.
+  prompt       String
+
+  // String[] = array de textos de Postgres (text[]): las opciones, en orden.
+  // 4 en opción múltiple y ["Verdadero", "Falso"] en verdadero o falso.
+  options      String[]
+
+  // Posición de la respuesta correcta dentro de options (empieza en 0).
+  correctIndex Int
+
+  // Por qué es la correcta. Opcional, hasta 1000 caracteres.
+  explanation  String?
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  // Veces que ha salido en un contraataque.
+  attempts     QuestionAttempt[]
+
+  @@index([subjectId])
+}
+
+
+// ========== INTENTO (RESPUESTA A UNA PREGUNTA) ==========
+// Una fila cada vez que una pregunta sale en un contraataque. La escribe el
+// combate (Fase 2, paso 2); el banco solo la lee para las estadísticas.
+model QuestionAttempt {
+  id             String        @id @default(cuid())
+
+  // Si se borra la pregunta, se borran sus intentos.
+  questionId     String
+  question       Question      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Vigilia en la que salió. Opcional, y SetNull: si se borra la vigilia
+  // (abandonarla la borra), el intento se queda, sin vigilia.
+  studySessionId String?
+  studySession   StudySession? @relation(fields: [studySessionId], references: [id], onDelete: SetNull)
+
+  // Opción elegida. null = la esquivó (no contestó).
+  chosenIndex    Int?
+
+  // ¿Acertó? Esquivar cuenta como fallo.
+  correct        Boolean
+
+  // Almas ganadas (positivo) o perdidas (negativo) con esta respuesta.
+  soulsDelta     Int
+
+  createdAt      DateTime      @default(now())
+
+  // Los intentos de un usuario con una pregunta (estadísticas, preguntas que
+  // vuelven) y todos los de una pregunta (borrado en cascada).
+  @@index([userId, questionId])
+  @@index([questionId])
 }

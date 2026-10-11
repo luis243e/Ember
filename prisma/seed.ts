@@ -1,38 +1,21 @@
 // Datos de prueba para la base de DESARROLLO (Postgres de Docker).
 // Ejecutar:  npm run db:seed
-// Crea (o vuelve a crear) la cuenta prueba@ember.test con materias, jefes en
-// varios estados, vigilias, almas y llama. Se niega a correr contra cualquier
+// Crea (o vuelve a crear) la cuenta prueba@ember.test con materias, preguntas,
+// jefes en varios estados, vigilias, almas y llama. Se niega a correr contra cualquier
 // base que no esté en este equipo.
 import { randomUUID } from "node:crypto";
-import { PrismaClient, type Difficulty, type TaskStatus } from "@prisma/client";
+import { PrismaClient, type Difficulty, type QuestionType, type TaskStatus } from "@prisma/client";
 import { hashPassword } from "better-auth/crypto";
 import { BOSSES_BY_DIFFICULTY, levelForSouls, maxHpFor, HP_PER_BLOCK } from "@/lib/game";
 import { todayDateInAppTimeZone } from "@/lib/dates";
+import { TRUE_FALSE_OPTIONS } from "@/lib/questions/validation";
+import { assertLocalDatabase } from "@/scripts/local-only";
 
 // ---------------------------------------------------------------------------
 //  Seguridad: solo localhost. Se comprueba ANTES de crear el cliente, así que
-//  contra otra base no llega ni a conectarse. Nunca se imprime la URL.
+//  contra otra base no llega ni a conectarse (ver scripts/local-only.ts).
 // ---------------------------------------------------------------------------
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-function assertLocal(name: string): void {
-  const value = process.env[name];
-  let host: string | null = null;
-  try {
-    host = value ? new URL(value).hostname : null;
-  } catch {
-    host = null;
-  }
-  if (!host || !LOCAL_HOSTS.has(host)) {
-    console.error(
-      `El seed solo funciona contra una base local: ${name} no apunta a localhost. No se ha tocado nada.`,
-    );
-    process.exit(1);
-  }
-}
-
-assertLocal("DATABASE_URL");
-assertLocal("DIRECT_URL");
+assertLocalDatabase("El seed");
 
 // ---------------------------------------------------------------------------
 //  Datos
@@ -121,6 +104,56 @@ const TASKS: SeedTask[] = [
   },
 ];
 
+// Banco de preguntas de Cálculo (todas MANUAL). Historia se queda sin
+// preguntas, para ver el estado vacío y las genéricas de autoevaluación.
+type SeedQuestion = {
+  type: QuestionType;
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+  explanation?: string;
+};
+
+const CALCULO_QUESTIONS: SeedQuestion[] = [
+  {
+    type: "MULTIPLE_CHOICE",
+    prompt: "¿Qué mide la derivada de una función en un punto?",
+    options: [
+      "El área bajo la curva",
+      "La pendiente de la recta tangente en ese punto",
+      "El valor máximo de la función",
+      "La distancia al origen",
+    ],
+    correctIndex: 1,
+  },
+  {
+    type: "TRUE_FALSE",
+    prompt: "Toda función continua es derivable.",
+    options: TRUE_FALSE_OPTIONS,
+    correctIndex: 1,
+    explanation: "|x| es continua en 0, pero no es derivable ahí: tiene un pico.",
+  },
+  {
+    type: "MULTIPLE_CHOICE",
+    prompt: "¿Cuál es la derivada de f(x) = x²?",
+    options: ["x", "2x", "x³ / 3", "2"],
+    correctIndex: 1,
+    explanation: "Regla de la potencia: la derivada de xⁿ es n·xⁿ⁻¹.",
+  },
+  {
+    type: "TRUE_FALSE",
+    prompt: "La derivada de una constante es 0.",
+    options: TRUE_FALSE_OPTIONS,
+    correctIndex: 0,
+  },
+  {
+    type: "MULTIPLE_CHOICE",
+    prompt: "¿Cuál es la derivada de sen(x)?",
+    options: ["cos(x)", "-cos(x)", "-sen(x)", "tan(x)"],
+    correctIndex: 0,
+  },
+];
+
 // ---------------------------------------------------------------------------
 //  Escritura
 // ---------------------------------------------------------------------------
@@ -132,8 +165,9 @@ async function main(): Promise<void> {
   const passwordHash = await hashPassword(PASSWORD);
 
   await prisma.$transaction(async (tx) => {
-    // Repetible: borra la cuenta anterior (en cascada: materias, jefes,
-    // vigilias, misiones, sesiones y cuentas) y la vuelve a crear.
+    // Repetible: borra la cuenta anterior (en cascada: materias, preguntas y
+    // sus intentos, jefes, vigilias, misiones, sesiones y cuentas) y la
+    // vuelve a crear.
     await tx.user.deleteMany({ where: { email: EMAIL } });
 
     const user = await tx.user.create({
@@ -165,6 +199,18 @@ async function main(): Promise<void> {
       calculo: await tx.subject.create({ data: { name: "Cálculo", userId: user.id } }),
       historia: await tx.subject.create({ data: { name: "Historia", userId: user.id } }),
     };
+
+    // Una a una y con un minuto de diferencia: el banco las ordena de la más
+    // nueva a la más antigua, y así sale la última de la lista arriba.
+    for (const [index, question] of CALCULO_QUESTIONS.entries()) {
+      await tx.question.create({
+        data: {
+          ...question,
+          subjectId: subjects.calculo.id,
+          createdAt: new Date(Date.now() - (CALCULO_QUESTIONS.length - index) * 60 * 1000),
+        },
+      });
+    }
 
     for (const [index, seed] of TASKS.entries()) {
       const maxHp = maxHpFor(seed.difficulty);
@@ -203,6 +249,7 @@ async function main(): Promise<void> {
 
   console.log(`Seed listo: ${EMAIL} / ${PASSWORD}`);
   console.log(`  ${TASKS.length} jefes en 2 materias, ${SOULS} almas, llama 4 (en peligro).`);
+  console.log(`  ${CALCULO_QUESTIONS.length} preguntas en Cálculo; Historia sin preguntas.`);
 }
 
 main()

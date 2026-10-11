@@ -17,6 +17,13 @@ export const inputStyles = cn(FIELD_BASE, "px-4");
 // cn(inputStyles, "pr-10"): cn no resuelve conflictos y podría ganar el px-4.
 export const selectStyles = cn(FIELD_BASE, "appearance-none truncate pr-10 pl-4");
 
+// <textarea>: el mismo borde, fondo, texto y foco, pero sin la altura fija de
+// FIELD_BASE (h-12): mide lo que diga rows y se puede estirar hacia abajo. No
+// se arma con cn(FIELD_BASE, ...) porque cn no resuelve conflictos y el h-12
+// podría ganar.
+export const textareaStyles =
+  "block w-full resize-y rounded-md border border-line bg-night px-4 py-3 text-[15px] leading-[1.5] text-parchment focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright";
+
 // Etiqueta de los campos. Exportada para las etiquetas que no pasan por
 // TextField (la de un <select> o la leyenda de un grupo de radios).
 export const labelStyles = "text-[13px] leading-[normal] font-medium text-ash";
