@@ -4,6 +4,7 @@
 // y que el borrador sea válido, y scripts/probar-escriba.ts. Va aparte, y no
 // en el archivo "use server", por lo mismo que lib/battle.ts: todo lo que
 // exporta ese archivo es una acción que cualquiera puede llamar.
+import { NEW_REVIEW } from "@/lib/game";
 import { prisma } from "@/lib/prisma";
 import type { QuestionInput } from "@/lib/questions/validation";
 
@@ -42,16 +43,21 @@ export async function guardarEdicion(questionId: string, nueva: QuestionInput): 
     if (!anterior) return "ok";
     if (anterior.sealed) return "sealed";
 
-    // Si es otra pregunta, sus estadísticas eran de la de antes: se borran
-    // sus intentos en la misma transacción que el cambio. (Por esto el sello
-    // es una columna: si se dedujera de los intentos, esto volvería a sellar
-    // una pregunta del escriba ya revelada.)
-    if (esOtraPregunta(anterior, nueva)) {
+    // Si es otra pregunta, sus estadísticas y su repaso eran de la de antes:
+    // se borran sus intentos y vuelve a ser nueva (nivel 0, sin fecha), en la
+    // misma transacción que el cambio. (Por esto el sello es una columna: si
+    // se dedujera de los intentos, esto volvería a sellar una pregunta del
+    // escriba ya revelada.)
+    const otra = esOtraPregunta(anterior, nueva);
+    if (otra) {
       await tx.questionAttempt.deleteMany({ where: { questionId } });
     }
     // Nunca se toca source: una pregunta del agente editada sigue siendo
     // del agente.
-    await tx.question.update({ where: { id: questionId }, data: nueva });
+    await tx.question.update({
+      where: { id: questionId },
+      data: { ...nueva, ...(otra && NEW_REVIEW) },
+    });
     return "ok";
   });
 }

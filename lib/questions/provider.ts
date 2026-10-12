@@ -5,6 +5,7 @@
 // la batalla.
 //
 // SOLO del servidor: lee la base y devuelve las respuestas correctas.
+import { pickForCounterattack, isReviewAfterFail } from "@/lib/game";
 import { prisma } from "@/lib/prisma";
 import { GENERIC_QUESTIONS } from "@/lib/questions/generic";
 import type { BattleQuestion } from "@/lib/questions/types";
@@ -26,12 +27,16 @@ function shuffled<T>(items: readonly T[]): T[] {
 // `cantidad` la decide la dificultad del jefe (COUNTERATTACK en lib/game.ts);
 // no tiene valor por defecto para que nadie se olvide de pasarla.
 //
-// - Al azar entre las de la materia, sin repetir dentro del mismo
-//   contraataque. Si hay menos que `cantidad`, devuelve las que haya.
+// - Por REPASO (pickForCounterattack en lib/game.ts): primero las que tocan
+//   (las falladas antes), después las nuevas al azar y, si aún faltan, las que
+//   vuelven antes; con 2 o más, al menos una nueva si la hay. Sin repetir
+//   dentro del mismo contraataque. Si hay menos que `cantidad`, devuelve las
+//   que haya.
 // - Si la materia no tiene ninguna, devuelve `cantidad` genéricas de
 //   autoevaluación (lib/questions/generic.ts).
 // - Si la materia no es del usuario (o no existe), lanza un error: quien la
 //   llame decide qué hacer (en una acción, notFound()).
+// `now` solo se pasa en las pruebas.
 //
 // ⚠ Lo que devuelve lleva correctIndex y explanation. La batalla guarda solo
 //   la referencia (id o clave) en el contraataque y al navegador manda
@@ -39,14 +44,11 @@ function shuffled<T>(items: readonly T[]): T[] {
 //   lib/questions/counterattack.ts); la respuesta se comprueba en el
 //   servidor. Si viajara antes de contestar, cualquiera podría leerla en las
 //   herramientas del navegador.
-//
-// TODO (paso 3, preguntas que vuelven): cambiar la prioridad usando
-//   QuestionAttempt, para que las falladas hace poco salgan antes que las
-//   acertadas.
 export async function preguntasParaContraataque(
   userId: string,
   subjectId: string,
   cantidad: number,
+  now: Date = new Date(),
 ): Promise<BattleQuestion[]> {
   const subject = await prisma.subject.findFirst({
     where: { id: subjectId, userId },
@@ -54,24 +56,22 @@ export async function preguntasParaContraataque(
   });
   if (!subject) throw new Error("La materia no existe o no es de este usuario.");
 
-  // Primero solo los ids (como mucho 200 por materia): se elige entre ellos y
-  // después se traen enteras solo las elegidas.
-  const ids = await prisma.question.findMany({
+  // Primero solo el id y el repaso (como mucho 200 por materia): se elige
+  // entre ellos y después se traen enteras solo las elegidas.
+  const candidatos = await prisma.question.findMany({
     where: { subjectId },
-    select: { id: true },
+    select: { id: true, reviewLevel: true, reviewDueAt: true },
   });
 
   // Copias: la lista de genéricas es compartida por toda la app y quien las
   // reciba no debe poder cambiarla.
-  if (ids.length === 0) {
+  if (candidatos.length === 0) {
     return shuffled(GENERIC_QUESTIONS)
       .slice(0, cantidad)
       .map((question) => ({ ...question, options: [...question.options] }));
   }
 
-  const elegidos = shuffled(ids)
-    .slice(0, cantidad)
-    .map(({ id }) => id);
+  const elegidos = pickForCounterattack(candidatos, cantidad, now, shuffled);
   const filas = await prisma.question.findMany({
     where: { id: { in: elegidos } },
     select: {
@@ -82,15 +82,20 @@ export async function preguntasParaContraataque(
       options: true,
       correctIndex: true,
       explanation: true,
+      reviewLevel: true,
+      reviewDueAt: true,
     },
   });
 
-  // findMany con "in" no respeta el orden de la lista: se reordena según el
-  // sorteo.
+  // findMany con "in" no respeta el orden de la lista: se reordena según la
+  // elección.
   const porId = new Map(filas.map((fila) => [fila.id, fila]));
   return elegidos.flatMap((id) => {
     const fila = porId.get(id);
     // Si alguien la borró entre las dos consultas, se salta.
-    return fila ? [{ ...fila, key: null }] : [];
+    if (!fila) return [];
+    const { reviewLevel, reviewDueAt, ...pregunta } = fila;
+    // review con lo leído AHORA, en la segunda consulta.
+    return [{ ...pregunta, key: null, review: isReviewAfterFail({ reviewLevel, reviewDueAt }) }];
   });
 }

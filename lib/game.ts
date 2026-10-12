@@ -3,7 +3,7 @@
 // "import type" no carga Prisma: solo trae el tipo, que desaparece al
 // compilar. Por eso este archivo también se puede usar en el navegador.
 import type { Difficulty } from "@prisma/client";
-import { parseDateInput } from "@/lib/dates";
+import { parseDateInput, startOfTodayInAppTimeZone, todayDateInAppTimeZone } from "@/lib/dates";
 
 // Vida que quita cada bloque de estudio.
 export const HP_PER_BLOCK = 100;
@@ -189,6 +189,127 @@ export const COUNTERATTACK = {
 export function counterattackSouls(kind: CounterattackKind, outcome: AnswerOutcome): number {
   if (outcome === "dodged") return COUNTERATTACK.dodge;
   return COUNTERATTACK.souls[kind][outcome];
+}
+
+// ---------------------------------------------------------------------------
+//  Repaso (las preguntas que vuelven)
+// ---------------------------------------------------------------------------
+
+// Repetición espaciada con niveles, como las cajas de Leitner: cada pregunta
+// del banco tiene un nivel de 0 a 5 (Question.reviewLevel) y una fecha en la
+// que vuelve a tocar (Question.reviewDueAt).
+//   - Fallar o esquivar → nivel 0 y toca ya: vuelve en el próximo
+//     contraataque.
+//   - Acertar → un nivel más (tope 5) y vuelve a los días que marca el nivel
+//     NUEVO. Son días de calendario en hora de Colombia: "1 día" es desde las
+//     00:00 de mañana en Bogotá, acierte a la hora que acierte.
+//   - Nivel 5 = dominada: sigue saliendo, cada 30 días.
+//   - Nueva (nunca contestada, o editada de forma que es otra) = nivel 0 y
+//     sin fecha. Las genéricas no tienen nivel.
+// Las funciones reciben la hora como parámetro para poder probarlas.
+export const REVIEW = {
+  maxLevel: 5,
+  daysByLevel: { 1: 1, 2: 3, 3: 7, 4: 14, 5: 30 },
+} as const satisfies { maxLevel: number; daysByLevel: Record<1 | 2 | 3 | 4 | 5, number> };
+
+type ReviewLevelUp = keyof typeof REVIEW.daysByLevel;
+
+export type ReviewFields = { reviewLevel: number; reviewDueAt: Date | null };
+
+// El repaso de una pregunta nueva. Es el valor por defecto de la base, y lo
+// que se guarda al editar una pregunta de forma que pasa a ser otra.
+export const NEW_REVIEW: ReviewFields = { reviewLevel: 0, reviewDueAt: null };
+
+// LA regla de cómo cambia el repaso al contestar una pregunta del banco.
+// correct = false también al esquivar. El SQL del relleno de la migración
+// 20261012183227_repaso hace lo mismo con nivel 0, y scripts/probar-repaso.ts
+// comprueba que los dos dan la misma fecha al milisegundo.
+export function nextReview(
+  level: number,
+  correct: boolean,
+  now: Date,
+): { reviewLevel: number; reviewDueAt: Date } {
+  if (!correct) return { reviewLevel: 0, reviewDueAt: now };
+  const reviewLevel = Math.min(Math.max(level, 0) + 1, REVIEW.maxLevel) as ReviewLevelUp;
+  // Las 00:00 de hoy en Bogotá más días enteros: como Colombia no tiene
+  // horario de verano, cae siempre en otras 00:00 de Bogotá.
+  const days = REVIEW.daysByLevel[reviewLevel];
+  return {
+    reviewLevel,
+    reviewDueAt: new Date(startOfTodayInAppTimeZone(now).getTime() + days * DAY_MS),
+  };
+}
+
+// Lo que el banco enseña de una pregunta revelada:
+//   new = nunca contestada; failed = la fallaste (o esquivaste) la última vez
+//   ("Vuelve pronto"); due = toca hoy y la habías acertado ("Toca repasar
+//   hoy"); later = vuelve dentro de `days` días de calendario (1 = mañana).
+// mastered = nivel 5 ("Dominada"), sea cual sea lo demás.
+export type ReviewState =
+  | { kind: "new"; mastered: false }
+  | { kind: "failed"; mastered: false }
+  | { kind: "due"; mastered: boolean }
+  | { kind: "later"; days: number; mastered: boolean };
+
+export function reviewState(level: number, dueAt: Date | null, now: Date): ReviewState {
+  if (dueAt === null) return { kind: "new", mastered: false };
+  if (level === 0) return { kind: "failed", mastered: false };
+  const mastered = level >= REVIEW.maxLevel;
+  if (dueAt.getTime() <= now.getTime()) return { kind: "due", mastered };
+  // Días entre el día de hoy y el de la fecha, los dos en Bogotá. Las dos
+  // fechas están a las 00:00 UTC, así que la resta es un múltiplo de un día.
+  const days = Math.round(
+    (todayDateInAppTimeZone(dueAt).getTime() - todayDateInAppTimeZone(now).getTime()) / DAY_MS,
+  );
+  return { kind: "later", days: Math.max(days, 1), mastered };
+}
+
+// Lo que el jefe necesita saber de cada pregunta de la materia para elegir.
+export type ReviewCandidate = { id: string } & ReviewFields;
+
+// ¿La fallaste (o esquivaste) la última vez? Es lo que se marca como REPASO
+// en el contraataque. Una nueva (sin fecha) no lo es.
+export function isReviewAfterFail(question: ReviewFields): boolean {
+  return question.reviewLevel === 0 && question.reviewDueAt !== null;
+}
+
+// LA regla de qué preguntas lanza el jefe: devuelve los ids de las elegidas
+// (como mucho `cantidad`, sin repetir) en el orden en que salen.
+//   1. Las que tocan (fecha ≤ ahora): primero las de nivel 0 (falladas),
+//      después la fecha más antigua.
+//   2. Las nuevas (sin fecha), al azar.
+//   3. Las que todavía no tocan, empezando por la que vuelve antes.
+// Reserva: si salen 2 o más y hay nuevas, al menos UNA es nueva, aunque haya
+// muchas que tocan: así las falladas no tapan siempre a las del escriba. La
+// nueva ocupa el sitio de la elegida con menos prioridad (la última).
+// `shuffle` baraja las nuevas; se pasa para poder probarlo sin azar. El id
+// desempata para que el orden sea siempre el mismo con los mismos datos.
+export function pickForCounterattack(
+  candidates: readonly ReviewCandidate[],
+  cantidad: number,
+  now: Date,
+  shuffle: <T>(items: readonly T[]) => T[],
+): string[] {
+  const byId = (a: ReviewCandidate, b: ReviewCandidate) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const time = (c: ReviewCandidate) => c.reviewDueAt!.getTime();
+  const nowMs = now.getTime();
+
+  const due = candidates
+    .filter((c) => c.reviewDueAt !== null && time(c) <= nowMs)
+    .sort(
+      (a, b) =>
+        Number(a.reviewLevel !== 0) - Number(b.reviewLevel !== 0) || time(a) - time(b) || byId(a, b),
+    );
+  const fresh = shuffle(candidates.filter((c) => c.reviewDueAt === null));
+  const later = candidates
+    .filter((c) => c.reviewDueAt !== null && time(c) > nowMs)
+    .sort((a, b) => time(a) - time(b) || byId(a, b));
+
+  const chosen = [...due, ...fresh, ...later].slice(0, Math.max(cantidad, 0));
+  if (chosen.length >= 2 && fresh.length > 0 && !chosen.some((c) => c.reviewDueAt === null)) {
+    chosen[chosen.length - 1] = fresh[0];
+  }
+  return chosen.map((c) => c.id);
 }
 
 // ---------------------------------------------------------------------------

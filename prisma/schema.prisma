@@ -493,13 +493,29 @@ model Question {
   // MANUAL sellada.
   sealed       Boolean        @default(false)
 
+  // REPASO (repetición espaciada, REVIEW en lib/game.ts). Van en la pregunta
+  // y no en una tabla aparte porque cada pregunta es de un solo usuario.
+  // reviewLevel: de 0 a 5 (5 = dominada). Un CHECK de la migración
+  // 20261012183227_repaso impide salirse. Lo cambian SOLO responderPreguntaDe
+  // (con nextReview) y editar una pregunta de forma que pasa a ser otra.
+  reviewLevel  Int            @default(0)
+  // Cuándo vuelve a tocar: un INSTANTE (las 00:00 de Bogotá, o el momento del
+  // fallo), no un día a las 00:00 UTC como Task.dueDate, porque se compara
+  // con la hora actual. null = nueva: nunca contestada (o editada desde
+  // entonces), incluidas las selladas.
+  reviewDueAt  DateTime?
+
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
   // Veces que ha salido en un contraataque.
   attempts     QuestionAttempt[]
 
+  // @@index([subjectId]) queda redundante con el segundo (empieza por
+  // subjectId), pero la migración del repaso es solo aditiva: ver pendientes.
   @@index([subjectId])
+  // Las que tocan de una materia, por fecha.
+  @@index([subjectId, reviewDueAt])
 }
 
 

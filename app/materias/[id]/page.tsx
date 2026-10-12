@@ -8,6 +8,7 @@ import { loadRedemption } from "@/lib/redemption";
 import { QUESTION_TYPE_LABELS, type QuestionDraft } from "@/lib/questions/validation";
 import { invocacionesRestantes } from "@/lib/agent/invocation";
 import { parseDateInput, todayInAppTimeZone } from "@/lib/dates";
+import { reviewState, type ReviewState } from "@/lib/game";
 import { AppShell } from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -60,11 +61,21 @@ async function loadStats(subjectId: string, userId: string): Promise<Map<string,
   return new Map(rows.map(({ questionId, ...stats }) => [questionId, stats]));
 }
 
-function statsText(stats: Stats | undefined): string {
+// "Acertada 2 de 3 veces · Vuelve en 3 días". Lo del repaso va al final: si
+// la fallaste ya lo dice el badge "Vuelve pronto", y una nueva no tiene fecha.
+function statsText(stats: Stats | undefined, review: ReviewState): string {
   if (!stats) return "Aún no ha salido en un contraataque";
   const veces = stats.total === 1 ? "vez" : "veces";
   const ultima = stats.ultimaCorrecta ? "" : " · fallada en el último contraataque";
-  return `Acertada ${formatNumber(stats.aciertos)} de ${formatNumber(stats.total)} ${veces}${ultima}`;
+  return `Acertada ${formatNumber(stats.aciertos)} de ${formatNumber(stats.total)} ${veces}${ultima}${reviewText(review)}`;
+}
+
+function reviewText(review: ReviewState): string {
+  if (review.kind === "due") return " · Toca repasar hoy";
+  if (review.kind === "later") {
+    return review.days === 1 ? " · Vuelve mañana" : ` · Vuelve en ${formatNumber(review.days)} días`;
+  }
+  return "";
 }
 
 // "21 preguntas, 9 de ellas selladas. Los jefes de esta materia te las harán
@@ -119,9 +130,12 @@ async function loadQuestions(subjectId: string) {
         options: true,
         correctIndex: true,
         explanation: true,
+        reviewLevel: true,
+        reviewDueAt: true,
         createdAt: true,
       },
     }),
+    // Tampoco su repaso: de una sellada no se enseña nada de eso.
     prisma.question.findMany({
       where: { subjectId, sealed: true },
       select: { id: true, type: true, createdAt: true },
@@ -134,9 +148,10 @@ async function loadQuestions(subjectId: string) {
     (a, b) =>
       b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
   );
-  // "Hoy" se toma aquí, fuera del componente: un componente de React debe dar
-  // siempre lo mismo con los mismos datos.
-  return { questions, revealed, sealedCount: sealed.length, today: todayInAppTimeZone() };
+  // "Hoy" y "ahora" se toman aquí, fuera del componente: un componente de
+  // React debe dar siempre lo mismo con los mismos datos.
+  const now = new Date();
+  return { questions, revealed, sealedCount: sealed.length, today: todayInAppTimeZone(now), now };
 }
 
 export default async function MateriaPage({ params, searchParams }: PageProps<"/materias/[id]">) {
@@ -148,7 +163,7 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
   const subject = await getSubject(id, sessionUser.id);
   if (!subject) notFound();
 
-  const [{ user, notices }, { questions, revealed, sealedCount, today }, stats, remaining] =
+  const [{ user, notices }, { questions, revealed, sealedCount, today, now }, stats, remaining] =
     await Promise.all([
       loadRedemption(sessionUser),
       loadQuestions(subject.id),
@@ -233,8 +248,10 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
                       );
                     }
                     const questionStats = stats.get(question.id);
-                    // Vuelve pronto: el último intento fue un fallo.
-                    const vuelvePronto = questionStats !== undefined && !questionStats.ultimaCorrecta;
+                    // El repaso: "Vuelve pronto" si la fallaste (o esquivaste)
+                    // la última vez, "Dominada" en el nivel 5 y cuándo vuelve
+                    // en la línea de estadística.
+                    const review = reviewState(question.reviewLevel, question.reviewDueAt, now);
                     const isEditing = question.id === edicion?.id;
                     return (
                       <li
@@ -250,9 +267,10 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
                         <div className="flex flex-wrap gap-2">
                           <Badge>{QUESTION_TYPE_LABELS[question.type]}</Badge>
                           {question.source === "AGENT" && <Badge>Del agente</Badge>}
-                          {vuelvePronto && (
+                          {review.kind === "failed" && (
                             <Badge tone="ember">Vuelve pronto</Badge>
                           )}
+                          {review.mastered && <Badge>Dominada</Badge>}
                           {isEditing && <Badge tone="muted">Editando</Badge>}
                         </div>
                         {/* whitespace-pre-line: respeta los saltos de línea del
@@ -270,7 +288,7 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
                         </p>
                         <AccionesPregunta
                           questionId={question.id}
-                          stats={statsText(questionStats)}
+                          stats={statsText(questionStats, review)}
                           editHref={`/materias/${subject.id}?editar=${question.id}#formulario`}
                         />
                       </li>

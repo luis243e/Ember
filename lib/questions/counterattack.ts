@@ -5,8 +5,10 @@
 // la referencia de la pregunta, su respuesta ni su explicación antes de
 // contestar; recibe solo publicQuestion().
 //
-// PENDIENTE (Fase 2, paso 4, la brasa): la brasa NO puede ganarse con
-// preguntas genéricas; si no, una materia sin preguntas daría brasa gratis.
+// PENDIENTE (Fase 2, paso 5, la brasa): se gana acertando TODAS las
+// preguntas del banco de un contraataque, SOLO contra jefes de dificultad
+// media o difícil. Las genéricas no cuentan (si no, una materia sin
+// preguntas daría brasa gratis). Máximo 2.
 import { randomInt } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { CounterattackKind } from "@/lib/game";
@@ -16,7 +18,10 @@ import type { BattleQuestion, PublicQuestion } from "@/lib/questions/types";
 // Una entrada de Counterattack.items: qué pregunta sale y en qué orden se
 // muestran sus opciones. La opción que se ENSEÑA en la posición i es la
 // opción order[i] de la pregunta.
-export type CounterattackItem = { ref: string; order: number[] };
+// review: true si, al crear el contraataque, la pregunta volvía después de
+// fallarla (el panel enseña "Repaso"). Se guarda solo cuando es true: los
+// items de antes del repaso no lo llevan y siguen siendo válidos.
+export type CounterattackItem = { ref: string; order: number[]; review?: true };
 
 // Las genéricas no están en la base: su referencia es "generic:<clave>". Los
 // ids de Question (cuid) nunca llevan ":", así que no se confunden.
@@ -90,7 +95,7 @@ export function buildItems(questions: readonly BattleQuestion[]): CounterattackI
       question.type === "MULTIPLE_CHOICE" && question.source !== "GENERIC"
         ? randomPermutation(n)
         : Array.from({ length: n }, (_, i) => i);
-    return { ref, order };
+    return question.review ? { ref, order, review: true } : { ref, order };
   });
 }
 
@@ -106,7 +111,7 @@ export function parseItems(json: Prisma.JsonValue): CounterattackItem[] {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       throw new Error(`Counterattack.items[${i}] no es un objeto.`);
     }
-    const { ref, order } = entry as Record<string, unknown>;
+    const { ref, order, review } = entry as Record<string, unknown>;
     if (typeof ref !== "string" || ref === "") {
       throw new Error(`Counterattack.items[${i}].ref no es válida.`);
     }
@@ -115,7 +120,10 @@ export function parseItems(json: Prisma.JsonValue): CounterattackItem[] {
     if ((n !== 2 && n !== 4) || !isPermutation(order, n)) {
       throw new Error(`Counterattack.items[${i}].order no es una permutación válida.`);
     }
-    return { ref, order };
+    if (review !== undefined && typeof review !== "boolean") {
+      throw new Error(`Counterattack.items[${i}].review no es un booleano.`);
+    }
+    return review === true ? { ref, order, review } : { ref, order };
   });
 }
 
@@ -170,13 +178,17 @@ export async function resolveItem(
 }
 
 // Lo único que viaja al navegador: enunciado y opciones en el orden mostrado,
-// y si es del escriba (para la etiqueta y el enlace "Retírala"). Mostrarla en
-// el contraataque es justo "lanzarla": se revela al contestarla.
-export function publicQuestion(question: ResolvedQuestion, order: readonly number[]): PublicQuestion {
+// si es del escriba (para la etiqueta y el enlace "Retírala") y si es de
+// repaso (la etiqueta "Repaso"). Mostrarla en el contraataque es justo
+// "lanzarla": se revela al contestarla.
+// Una sellada nunca es de repaso (nadie la ha contestado: contestarla la
+// revela); el !sealed lo asegura aunque items dijera otra cosa.
+export function publicQuestion(question: ResolvedQuestion, item: CounterattackItem): PublicQuestion {
   return {
     kind: question.kind,
     fromAgent: question.fromAgent,
+    review: item.review === true && !question.sealed,
     prompt: question.prompt,
-    options: order.map((i) => question.options[i]),
+    options: item.order.map((i) => question.options[i]),
   };
 }

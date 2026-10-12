@@ -89,6 +89,8 @@ export const GENERIC_QUESTIONS: readonly BattleQuestion[] = PREGUNTAS.map(({ key
   options: GENERIC_OPTIONS,
   correctIndex: 0,
   explanation,
+  // Las genéricas no tienen repaso.
+  review: false,
 }));
 
 // La genérica de una clave, o undefined si ya no existe.

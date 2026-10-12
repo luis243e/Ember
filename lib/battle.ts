@@ -28,6 +28,7 @@ import {
   flameAfterStrike,
   HP_PER_BLOCK,
   levelForSouls,
+  nextReview,
   rollStrikeSouls,
   rollVictorySouls,
   vigilDurationMs,
@@ -373,6 +374,10 @@ export type ResultadoRespuesta =
 
 const falloRespuesta = (error: string): ResultadoRespuesta => ({ ok: false, error });
 
+// Se lanza dentro de la transacción de responder para deshacerla entera si la
+// pregunta ya no está al ir a bloquearla.
+class PreguntaBorrada extends Error {}
+
 // Contesta la pregunta número `questionNumber` (empieza en 0) del contraataque
 // con la opción MOSTRADA `chosenIndex`, o la esquiva (null). null = el
 // contraataque no existe o es de otro usuario (la acción responde 404).
@@ -453,20 +458,30 @@ export async function responderPreguntaDe(
         if (level > levelForSouls(owner.souls).level) newLevel = level;
       }
 
-      // 4. El intento, solo con preguntas del banco (las genéricas no están
-      // en la base). Esquivar se guarda como no acertada: el paso 3 la hará
-      // volver antes. Si la pregunta era del escriba y seguía SELLADA, aquí
-      // se revela: desde ahora el banco enseña su enunciado y su respuesta.
-      // Bloquea la fila de la pregunta DESPUÉS del contraataque y del usuario
-      // (contraataque → usuario → pregunta); editar y borrar una pregunta
-      // solo bloquean la pregunta, así que no pueden esperarse en círculo.
+      // 4. El repaso y el intento, solo con preguntas del banco (las
+      // genéricas no están en la base ni tienen nivel). Bloquea la fila de la
+      // pregunta DESPUÉS del contraataque y del usuario (contraataque →
+      // usuario → pregunta); editar y borrar una pregunta solo bloquean la
+      // pregunta, así que no pueden esperarse en círculo. Con la fila
+      // bloqueada, el nivel que se lee es el de ahora: dos contraataques con
+      // la misma pregunta no pueden subirlo los dos desde el mismo valor.
       if (question?.questionId) {
-        if (question.sealed) {
-          await tx.question.updateMany({
-            where: { id: question.questionId, sealed: true },
-            data: { sealed: false },
-          });
-        }
+        const [locked] = await tx.$queryRaw<{ reviewLevel: number }[]>`
+          SELECT "reviewLevel" FROM "Question"
+          WHERE "id" = ${question.questionId} FOR UPDATE`;
+        // Se borró entre leerla y ahora: no se ha guardado nada todavía.
+        if (!locked) throw new PreguntaBorrada();
+        // En una sola escritura: el repaso nuevo (esquivar cuenta como fallo,
+        // y vuelve en el próximo contraataque) y, si era del escriba y seguía
+        // SELLADA, el sello fuera: desde ahora el banco enseña su enunciado y
+        // su respuesta.
+        await tx.question.update({
+          where: { id: question.questionId },
+          data: {
+            ...nextReview(locked.reviewLevel, outcome === "correct", now),
+            ...(question.sealed && { sealed: false }),
+          },
+        });
         await tx.questionAttempt.create({
           data: {
             questionId: question.questionId,
@@ -512,9 +527,13 @@ export async function responderPreguntaDe(
       // midieron ~2 s, justo los 2 s por defecto: fallaba con P2028).
     }, { timeout: 15_000, maxWait: 10_000 });
   } catch (error) {
-    // P2003 = clave foránea rota: la pregunta se borró justo entre leerla y
-    // guardar el intento. No se ha guardado nada; al reintentar, se salta.
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+    // La pregunta se borró justo entre leerla y bloquearla (PreguntaBorrada)
+    // o entre bloquearla y guardar el intento (P2003 = clave foránea rota).
+    // No se ha guardado nada; al reintentar, se salta.
+    if (
+      error instanceof PreguntaBorrada ||
+      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003")
+    ) {
       return falloRespuesta("Esa pregunta se acaba de borrar. Vuelve a intentarlo.");
     }
     throw error;

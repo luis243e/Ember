@@ -162,7 +162,13 @@ export function CounterattackPanel({
                   >
                     {boss.article} {boss.name} contraataca
                   </h2>
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Repaso: vuelve porque la fallaste la última vez. */}
+                    {current.question?.review && (
+                      <Badge tone="ember" className="px-2">
+                        Repaso
+                      </Badge>
+                    )}
                     {current.question?.fromAgent && <Badge className="px-2">Del agente</Badge>}
                     <p className="text-[13px] leading-[normal] font-semibold text-smoke">
                       Pregunta {current.number + 1} de {current.total}

@@ -133,8 +133,8 @@ function probarReglas(): void {
   check("parseItems acepta uno bien formado", parseItems([{ ref: "x", order: [1, 0, 3, 2] }]).length === 1);
 
   const items = buildItems([
-    { id: "mc", key: null, source: "MANUAL", type: "MULTIPLE_CHOICE", prompt: "", options: ["a", "b", "c", "d"], correctIndex: 0, explanation: null },
-    { id: "tf", key: null, source: "MANUAL", type: "TRUE_FALSE", prompt: "", options: ["Verdadero", "Falso"], correctIndex: 0, explanation: null },
+    { id: "mc", key: null, source: "MANUAL", type: "MULTIPLE_CHOICE", prompt: "", options: ["a", "b", "c", "d"], correctIndex: 0, explanation: null, review: false },
+    { id: "tf", key: null, source: "MANUAL", type: "TRUE_FALSE", prompt: "", options: ["Verdadero", "Falso"], correctIndex: 0, explanation: null, review: false },
     GENERIC_QUESTIONS[0],
   ]);
   check("buildItems: la ref es el id, o generic:<clave>", items[0].ref === "mc" && items[2].ref === `generic:${GENERIC_QUESTIONS[0].key}`);
@@ -238,10 +238,10 @@ async function probarConBase(userId: string, otherUserId: string): Promise<void>
   } catch {
     check("el índice único impide un segundo contraataque para la misma vigilia", true);
   }
-  const pub = publicQuestion((await preguntaQueToca(ca1.id)).question, items1[0].order);
+  const pub = publicQuestion((await preguntaQueToca(ca1.id)).question, items1[0]);
   check(
-    "lo público solo lleva kind, fromAgent, prompt y options (ni id, ni correcta, ni explicación)",
-    same(Object.keys(pub).sort(), ["fromAgent", "kind", "options", "prompt"]),
+    "lo público solo lleva kind, fromAgent, review, prompt y options (ni id, ni correcta, ni explicación)",
+    same(Object.keys(pub).sort(), ["fromAgent", "kind", "options", "prompt", "review"]),
     Object.keys(pub),
   );
 

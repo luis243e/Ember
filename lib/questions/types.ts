@@ -19,6 +19,10 @@ export type BattleQuestion = {
   options: string[];
   correctIndex: number;
   explanation: string | null;
+  // La fallaste (o esquivaste) la última vez que salió: el contraataque la
+  // marca como REPASO. Siempre false en las nuevas, las selladas y las
+  // genéricas.
+  review: boolean;
 };
 
 // Lo que el NAVEGADOR recibe de una pregunta del contraataque: el tipo (para
@@ -31,6 +35,9 @@ export type PublicQuestion = {
   // La escribió el escriba: el panel enseña "Del agente" y, después de
   // contestarla, el enlace para retirarla.
   fromAgent: boolean;
+  // Vuelve después de fallarla: el panel enseña "Repaso". Solo el booleano:
+  // ni el nivel ni la fecha salen del servidor.
+  review: boolean;
   prompt: string;
   options: string[];
 };

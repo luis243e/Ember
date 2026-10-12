@@ -12,8 +12,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
 - **Base de datos:** 12 tablas (ver [Modelo de datos](#modelo-de-datos)),
-  creadas con 13 migraciones (la 12.ª, `20261011011609_contraataque`, y la
-  13.ª, `20261012010722_escriba`, solo en la base local).
+  creadas con 14 migraciones (la 14.ª, `20261012183227_repaso`, solo en la
+  base local; la 12.ª y la 13.ª ya están en `main`, commits `6026efc` y
+  `53e2712`).
   RLS activado en todas, y en producción también en `_prisma_migrations` (a
   mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
@@ -26,13 +27,16 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261012010722_escriba` (11 oct, sin commit;
-  solo en la base local): crea `AgentInvocation` (con los enums
+- **Migraciones:** la última es `20261012183227_repaso` (12 oct, sin commit;
+  solo en la base local): añade `Question.reviewLevel` (por defecto 0, con un
+  `CHECK` a mano de 0 a 5) y `Question.reviewDueAt` (opcional), un índice
+  `(subjectId, reviewDueAt)` y **rellena** las preguntas que ya existían a
+  partir de su último intento. Solo añade cosas. La anterior,
+  `20261012010722_escriba` (commit `53e2712`): crea `AgentInvocation` (con los enums
   `AgentInvocationStatus` y `AgentInputKind`, dos índices, claves foráneas en
   `Cascade` y RLS) y añade `Question.sealed` (por defecto `false`) con un
   `CHECK` a mano (solo las del escriba pueden estar selladas). Solo añade
-  cosas. La anterior, `20261011011609_contraataque` (sin commit; solo en la
-  base local): crea `Counterattack` (con
+  cosas. La anterior, `20261011011609_contraataque` (commit `6026efc`): crea `Counterattack` (con
   `items` en `jsonb`, índice único en `studySessionId`, claves foráneas en
   `Cascade` y RLS). Solo añade cosas. La anterior,
   `20261011001244_banco_preguntas` (commit `b1593c8`; según Luis, el paso 1
@@ -65,7 +69,22 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis; **antes del push hay que crear `GMAIL_USER` y
   `GMAIL_APP_PASSWORD` en Vercel**. Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
-- **Fase 2 · paso 3: el escriba (11 oct, sin commit):** en `/materias/[id]`,
+- **Fase 2 · paso 4: las preguntas que vuelven (12 oct, sin commit):**
+  repetición espaciada tipo Leitner. Cada pregunta del banco tiene un nivel
+  de 0 a 5 y una fecha en la que vuelve (`REVIEW` y `nextReview()` en
+  `lib/game.ts`). Fallar o esquivar → nivel 0 y vuelve en el próximo
+  contraataque; acertar → un nivel más y vuelve a los 1, 3, 7, 14 o 30 días
+  de calendario de Colombia (desde las 00:00 de Bogotá). El jefe elige
+  primero las que tocan (las falladas antes), después las nuevas y después
+  las que vuelven antes; con 2 o más preguntas, al menos una es nueva
+  (`pickForCounterattack()`). En la batalla, la etiqueta «Repaso»; en el
+  banco, «Vuelve pronto», «Toca repasar hoy», «Vuelve mañana», «Vuelve en N
+  días» y «Dominada». Editar una pregunta de forma que pasa a ser otra la
+  deja nueva. Probado en local (script de 92 comprobaciones, la fecha del
+  relleno SQL idéntica a `nextReview` al milisegundo, y Chrome, también a
+  320 px). Detalles en
+  [2026-10-12-preguntas-que-vuelven.md](sesiones/2026-10-12-preguntas-que-vuelven.md).
+- **Fase 2 · paso 3: el escriba (11 oct, commit `53e2712`):** en `/materias/[id]`,
   la tarjeta «Generar con tus apuntes» (Figma 107:2 y 111:2): se pega texto
   (hasta 20.000 caracteres) o se sube un PDF (hasta 4 MB y 40 páginas) y
   Google Gemini escribe de 3 a 15 preguntas (lo decide el escriba). Llegan
@@ -81,7 +100,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   Gemini y Chrome, también a 320 px). Un 503 de Gemini se reintenta una vez. **Antes del push hay que crear
   `GEMINI_API_KEY` y `GEMINI_MODEL` en Vercel.** Detalles en
   [2026-10-11-el-escriba.md](sesiones/2026-10-11-el-escriba.md).
-- **Fase 2 · paso 2: el contraataque (10 oct, sin commit):** después de un
+- **Fase 2 · paso 2: el contraataque (10 oct, commit `6026efc`):** después de un
   golpe que no derrota al jefe, el jefe contraataca con hasta 3 preguntas de
   su materia (hoy, 1, 2 o 3 según la dificultad: ver el paso 3) (`preguntasParaContraataque()`; genéricas si no tiene), una cada
   vez y sin reloj, en un panel modal sobre la batalla (Figma 105:2, 105:77 y
@@ -201,9 +220,9 @@ migraciones, y el schema lo avisa con un comentario.
 | `Task` | Jefe: vida, dificultad, fecha de entrega, estado, `bossKey` | De una `Subject` (no tiene `userId`: se filtra por la materia) |
 | `StudySession` | Vigilia de 25 min y sus almas | De una `Task` y de un `User`. Una sola abierta por usuario (índice parcial) |
 | `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo | De un `User` y una `Task`. Una sola `ACTIVE` por usuario (índice parcial) |
-| `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation`, `sealed` (del escriba y aún sin contestar) | De una `Subject` (`Cascade`). Cuatro `CHECK` a mano (el cuarto: solo las `AGENT` pueden estar selladas) |
+| `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation`, `sealed` (del escriba y aún sin contestar), `reviewLevel` (0–5) y `reviewDueAt` (cuándo vuelve; `null` = nueva) | De una `Subject` (`Cascade`). Cinco `CHECK` a mano (el cuarto: solo las `AGENT` pueden estar selladas; el quinto: `reviewLevel` entre 0 y 5) |
 | `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque: `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta` (las aplicadas). La escribe `responderPreguntaDe` (`chosenIndex` en el orden ORIGINAL de la pregunta); las genéricas no | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
-| `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, y `order` = permutación de sus opciones), `answered`, `correctCount`, `soulsDelta`, `finishedAt` | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
+| `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, `order` = permutación de sus opciones y, solo si es de repaso, `review: true`), `answered`, `correctCount`, `soulsDelta`, `finishedAt` | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
 | `AgentInvocation` | Cada invocación del escriba: `status` (`PENDING` / `OK` / `FAILED`), `inputKind` (`TEXT` / `PDF`), `questionsCreated`, `createdAt`, `finishedAt`. Para el límite diario. **No guarda los apuntes, ni el PDF, ni el nombre del archivo** | De un `User` y una `Subject` (`Cascade`) |
 | `Session`, `Account`, `Verification` | Tablas de Better Auth (sesiones, contraseña, enlaces de verificación) | `Session` y `Account` de un `User` |
 
@@ -274,6 +293,15 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   `schema.prisma`, porque su CLI renombraría `User` a `user`.
 - **Nunca editar una migración ya aplicada.** Se cambia el schema y se crea
   una migración nueva.
+- **Un relleno de datos va en SQL dentro de su migración**, entre las marcas
+  `-- relleno:inicio` y `-- relleno:fin`, y si repite una regla de
+  TypeScript, un script lo ejecuta dentro de una transacción que se deshace y
+  comprueba que da lo mismo que esa función (como `probar-repaso` con
+  `nextReview`). Así se aplica una vez en cada base y no se separa de la regla.
+- **Fechas: día o instante.** Las fechas que son *días* (`Task.dueDate`,
+  `User.lastStrikeDay`) se guardan a las 00:00 UTC. Las que se comparan con
+  la hora actual (`Question.reviewDueAt`) son *instantes*: las 00:00 de Bogotá
+  son las 05:00 UTC (`startOfTodayInAppTimeZone`). No mezclarlas.
 - **Desarrollo y producción son bases separadas.** El `.env` de cada equipo
   apunta solo al Postgres de Docker (`localhost:5433`). Los valores de
   producción solo los tiene Vercel (y se consultan en Supabase → *Connect*):
@@ -656,6 +684,14 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 
 ## Pendientes
 
+- [ ] **Fase 2 · paso 5, la brasa.** La brasa se gana acertando todas las
+  preguntas del banco de un contraataque, SOLO contra jefes de dificultad
+  media o difícil. Las genéricas no cuentan. Máximo 2.
+- [ ] Borrar `@@index([subjectId])` de `Question` en una migración futura: el
+  índice `(subjectId, reviewDueAt)` del paso 4 lo cubre. No se borró porque
+  la migración del repaso tenía que ser solo aditiva.
+- [ ] Desplegar `20261012183227_repaso` (y probar el repaso en producción):
+  allí el relleno usará los intentos de producción.
 - [ ] **Secuestro previo de cuenta.** Alguien puede registrar un correo
   ajeno con su contraseña y, como el reenvío no la pide, hacer que al dueño
   le lleguen enlaces de verificación. Si el dueño abre uno, entra
@@ -783,13 +819,17 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base de producción se recrea, volver a activar a mano el RLS de
   `_prisma_migrations` (en la local no hace falta: no tiene API pública).
-- [x] ~~Fase 2 · paso 3: el escriba~~ (11 oct, sin commit): preguntas con
+- [x] ~~Fase 2 · paso 4: las preguntas que vuelven~~ (12 oct, sin commit):
+  nivel y fecha de repaso por pregunta, migración con relleno, el jefe elige
+  por repaso con una nueva reservada, «Repaso» en la batalla y estados en el
+  banco.
+- [x] ~~Fase 2 · paso 3: el escriba~~ (11 oct, commit `53e2712`): preguntas con
   Gemini desde texto o PDF, selladas hasta que un jefe las lanza, límite de 3
   al día, «Retírala» en la batalla y contraataque según la dificultad.
 - [x] ~~Decidir si editar una pregunta del agente la convierte en `MANUAL`~~
   (11 oct): sigue siendo `AGENT`; para que editarla no la vuelva a sellar, el
   sello es una columna (`Question.sealed`).
-- [x] ~~Fase 2 · paso 2: el contraataque~~ (10 oct, sin commit): preguntas
+- [x] ~~Fase 2 · paso 2: el contraataque~~ (10 oct, commit `6026efc`): preguntas
   después del golpe, estado en `Counterattack`, `QuestionAttempt` (con
   `chosenIndex` comprobado dentro de las opciones), genéricas sin restar.
 - [x] ~~Activar la verificación de correo~~ (10 oct, sin commit): enlace al
@@ -871,3 +911,4 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-10 | Fase 2 · paso 1: banco de preguntas (`Question`, `QuestionAttempt`, enums, `String[]`, `CHECK` a mano), `/materias/[id]`, proveedor único y preguntas genéricas | [2026-10-10-banco-de-preguntas.md](sesiones/2026-10-10-banco-de-preguntas.md) |
 | 2026-10-10 | Fase 2 · paso 2: el contraataque (`Counterattack` con `items` en `jsonb`, permutación con `node:crypto`, valor esperado 0, índice único por vigilia, orden de bloqueos ampliado, `lib/battle.ts`, panel modal accesible) | [2026-10-10-contraataque.md](sesiones/2026-10-10-contraataque.md) |
 | 2026-10-11 | Fase 2 · paso 3: el escriba (Gemini por `fetch`, salida estructurada, inyección de prompt, PDF en base64 con páginas contadas sin dependencias y topes contra bombas, preguntas selladas con `Question.sealed`, límite diario con reserva `PENDING`, «Retírala», contraataque según la dificultad) | [2026-10-11-el-escriba.md](sesiones/2026-10-11-el-escriba.md) |
+| 2026-10-12 | Fase 2 · paso 4: las preguntas que vuelven (repetición espaciada tipo Leitner, días de calendario de Bogotá, migración con relleno en SQL comprobado contra `nextReview`, reserva para nuevas, `FOR UPDATE` del nivel, «Repaso» y estados del banco) | [2026-10-12-preguntas-que-vuelven.md](sesiones/2026-10-12-preguntas-que-vuelven.md) |

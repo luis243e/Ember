@@ -132,7 +132,7 @@ async function loadCounterattack(counter: { id: string; items: Prisma.JsonValue;
     // Empieza en 0: es lo que la acción espera recibir de vuelta.
     number: counter.answered,
     total: items.length,
-    question: question ? publicQuestion(question, item.order) : null,
+    question: question ? publicQuestion(question, item) : null,
   };
 }
 
