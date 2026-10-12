@@ -150,7 +150,9 @@ export function applySoulsDelta(souls: number, delta: number): { souls: number; 
 // ---------------------------------------------------------------------------
 
 // Después de un golpe aceptado que NO derrota al jefe, el jefe contraataca con
-// hasta `questions` preguntas de su materia, una cada vez y sin reloj.
+// preguntas de su materia, una cada vez y sin reloj: tantas como diga
+// questionsByDifficulty (fácil 1, media 2, difícil 3; menos si la materia no
+// tiene tantas).
 //
 // Almas por pregunta. Los números están elegidos para que contestar AL AZAR dé
 // 0 de media (valor esperado):
@@ -168,7 +170,7 @@ export type CounterattackKind = "MULTIPLE_CHOICE" | "TRUE_FALSE" | "GENERIC";
 export type AnswerOutcome = "correct" | "wrong" | "dodged";
 
 export const COUNTERATTACK = {
-  questions: 3,
+  questionsByDifficulty: { EASY: 1, MEDIUM: 2, HARD: 3 },
   souls: {
     MULTIPLE_CHOICE: { correct: 15, wrong: -5 },
     TRUE_FALSE: { correct: 10, wrong: -10 },
@@ -177,7 +179,7 @@ export const COUNTERATTACK = {
   },
   dodge: 0,
 } as const satisfies {
-  questions: number;
+  questionsByDifficulty: Record<Difficulty, number>;
   souls: Record<CounterattackKind, { correct: number; wrong: number }>;
   dodge: number;
 };

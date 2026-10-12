@@ -28,6 +28,9 @@ export type BattleQuestion = {
 // publicQuestion() (lib/questions/counterattack.ts).
 export type PublicQuestion = {
   kind: CounterattackKind;
+  // La escribió el escriba: el panel enseña "Del agente" y, después de
+  // contestarla, el enlace para retirarla.
+  fromAgent: boolean;
   prompt: string;
   options: string[];
 };

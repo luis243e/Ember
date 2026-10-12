@@ -63,6 +63,17 @@ export function todayDateInAppTimeZone(now: Date = new Date()): Date {
   return date;
 }
 
+// El INSTANTE en que empezó hoy en APP_TIME_ZONE: las 00:00 de Bogotá, que son
+// las 05:00 UTC. No es la convención de las fechas de entrega (esas son días
+// guardados a las 00:00 UTC): esto se compara con instantes de verdad, como el
+// createdAt de una invocación del escriba. Colombia no tiene horario de
+// verano, así que el desfase es siempre de 5 horas.
+const APP_UTC_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+export function startOfTodayInAppTimeZone(now: Date = new Date()): Date {
+  return new Date(todayDateInAppTimeZone(now).getTime() + APP_UTC_OFFSET_MS);
+}
+
 // "20 de octubre de 2026". En UTC, porque así se guardó (ver arriba).
 const dueDateFormatter = new Intl.DateTimeFormat("es-CO", {
   timeZone: "UTC",

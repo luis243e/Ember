@@ -121,7 +121,7 @@ async function probarProveedor(tempSubjectId: string): Promise<void> {
   if (!calculo || !historia) throw new Error("Faltan las materias del seed.");
   const enCalculo = await prisma.question.count({ where: { subjectId: calculo.id } });
 
-  const tres = await preguntasParaContraataque(user.id, calculo.id);
+  const tres = await preguntasParaContraataque(user.id, calculo.id, 3);
   const ids = tres.map((q) => q.id);
   check("por defecto devuelve 3", tres.length === 3, tres.length);
   check("todas son MANUAL y con id", tres.every((q) => q.source === "MANUAL" && typeof q.id === "string"));
@@ -143,11 +143,11 @@ async function probarProveedor(tempSubjectId: string): Promise<void> {
   // Al azar: en 40 sorteos de 3 entre 5 tiene que salir más de un orden.
   const ordenes = new Set<string>();
   for (let i = 0; i < 40; i++) {
-    ordenes.add((await preguntasParaContraataque(user.id, calculo.id)).map((q) => q.id).join(","));
+    ordenes.add((await preguntasParaContraataque(user.id, calculo.id, 3)).map((q) => q.id).join(","));
   }
   check(`el orden cambia entre sorteos (${ordenes.size} distintos en 40)`, ordenes.size > 1);
 
-  const genericas = await preguntasParaContraataque(user.id, historia.id);
+  const genericas = await preguntasParaContraataque(user.id, historia.id, 3);
   check(
     "materia sin preguntas → 3 genéricas",
     genericas.length === 3 && genericas.every((q) => q.source === "GENERIC" && q.id === null),
@@ -179,10 +179,10 @@ async function probarProveedor(tempSubjectId: string): Promise<void> {
     }
   };
   await rechaza("rechaza la materia de otro usuario", () =>
-    preguntasParaContraataque(user.id, tempSubjectId),
+    preguntasParaContraataque(user.id, tempSubjectId, 3),
   );
   await rechaza("rechaza una materia que no existe", () =>
-    preguntasParaContraataque(user.id, "no-existe"),
+    preguntasParaContraataque(user.id, "no-existe", 3),
   );
 }
 

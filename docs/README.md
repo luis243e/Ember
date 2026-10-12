@@ -11,9 +11,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `main` se despliega solo.
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
-- **Base de datos:** 11 tablas (ver [Modelo de datos](#modelo-de-datos)),
-  creadas con 12 migraciones (la 12.ª, `20261011011609_contraataque`, solo
-  en la base local).
+- **Base de datos:** 12 tablas (ver [Modelo de datos](#modelo-de-datos)),
+  creadas con 13 migraciones (la 12.ª, `20261011011609_contraataque`, y la
+  13.ª, `20261012010722_escriba`, solo en la base local).
   RLS activado en todas, y en producción también en `_prisma_migrations` (a
   mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
@@ -26,8 +26,13 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261011011609_contraataque` (10 oct en
-  Colombia, sin commit; solo en la base local): crea `Counterattack` (con
+- **Migraciones:** la última es `20261012010722_escriba` (11 oct, sin commit;
+  solo en la base local): crea `AgentInvocation` (con los enums
+  `AgentInvocationStatus` y `AgentInputKind`, dos índices, claves foráneas en
+  `Cascade` y RLS) y añade `Question.sealed` (por defecto `false`) con un
+  `CHECK` a mano (solo las del escriba pueden estar selladas). Solo añade
+  cosas. La anterior, `20261011011609_contraataque` (sin commit; solo en la
+  base local): crea `Counterattack` (con
   `items` en `jsonb`, índice único en `studySessionId`, claves foráneas en
   `Cascade` y RLS). Solo añade cosas. La anterior,
   `20261011001244_banco_preguntas` (commit `b1593c8`; según Luis, el paso 1
@@ -60,9 +65,25 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis; **antes del push hay que crear `GMAIL_USER` y
   `GMAIL_APP_PASSWORD` en Vercel**. Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
+- **Fase 2 · paso 3: el escriba (11 oct, sin commit):** en `/materias/[id]`,
+  la tarjeta «Generar con tus apuntes» (Figma 107:2 y 111:2): se pega texto
+  (hasta 20.000 caracteres) o se sube un PDF (hasta 4 MB y 40 páginas) y
+  Google Gemini escribe de 3 a 15 preguntas (lo decide el escriba). Llegan
+  **selladas**: ni su enunciado, ni sus opciones, ni su respuesta salen del
+  servidor hasta que un jefe las lanza y se contestan o se esquivan; no se
+  editan, solo se borran. Límite: 3 invocaciones con éxito por usuario y día
+  de Colombia (las fallidas no cuentan). Los apuntes y el PDF no se guardan
+  nunca. En la batalla, «Del agente» y, tras contestar, «¿Está mal esta
+  pregunta? Retírala» (Figma 108:84). Todo en `lib/agent/` (`fetch` a la API
+  REST de Gemini, sin dependencias). Además, **el contraataque lanza 1, 2 o 3
+  preguntas según la dificultad del jefe** (fácil, media, difícil). Probado
+  en local (script de 113 comprobaciones con el payload, 2 llamadas reales a
+  Gemini y Chrome, también a 320 px). Un 503 de Gemini se reintenta una vez. **Antes del push hay que crear
+  `GEMINI_API_KEY` y `GEMINI_MODEL` en Vercel.** Detalles en
+  [2026-10-11-el-escriba.md](sesiones/2026-10-11-el-escriba.md).
 - **Fase 2 · paso 2: el contraataque (10 oct, sin commit):** después de un
   golpe que no derrota al jefe, el jefe contraataca con hasta 3 preguntas de
-  su materia (`preguntasParaContraataque()`; genéricas si no tiene), una cada
+  su materia (hoy, 1, 2 o 3 según la dificultad: ver el paso 3) (`preguntasParaContraataque()`; genéricas si no tiene), una cada
   vez y sin reloj, en un panel modal sobre la batalla (Figma 105:2, 105:77 y
   105:157, sin la brasa). Opción múltiple +15 / −5, verdadero o falso
   +10 / −10, genéricas +5 siempre, esquivar 0; lo que se resta nunca baja de
@@ -175,14 +196,15 @@ migraciones, y el schema lo avisa con un comentario.
 
 | Tabla | Qué guarda | Relaciones |
 |---|---|---|
-| `User` | Usuario y su personaje: nivel, almas, llama, límite de correos | Tiene materias, vigilias, misiones, intentos, contraataques, sesiones y cuentas |
+| `User` | Usuario y su personaje: nivel, almas, llama, límite de correos | Tiene materias, vigilias, misiones, intentos, contraataques, invocaciones del escriba, sesiones y cuentas |
 | `Subject` | Materia ("Cálculo") | De un `User`. Tiene jefes (`Task`) y preguntas (`Question`) |
 | `Task` | Jefe: vida, dificultad, fecha de entrega, estado, `bossKey` | De una `Subject` (no tiene `userId`: se filtra por la materia) |
 | `StudySession` | Vigilia de 25 min y sus almas | De una `Task` y de un `User`. Una sola abierta por usuario (índice parcial) |
 | `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo | De un `User` y una `Task`. Una sola `ACTIVE` por usuario (índice parcial) |
-| `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation` | De una `Subject` (`Cascade`). Tres `CHECK` a mano |
+| `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation`, `sealed` (del escriba y aún sin contestar) | De una `Subject` (`Cascade`). Cuatro `CHECK` a mano (el cuarto: solo las `AGENT` pueden estar selladas) |
 | `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque: `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta` (las aplicadas). La escribe `responderPreguntaDe` (`chosenIndex` en el orden ORIGINAL de la pregunta); las genéricas no | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
 | `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, y `order` = permutación de sus opciones), `answered`, `correctCount`, `soulsDelta`, `finishedAt` | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
+| `AgentInvocation` | Cada invocación del escriba: `status` (`PENDING` / `OK` / `FAILED`), `inputKind` (`TEXT` / `PDF`), `questionsCreated`, `createdAt`, `finishedAt`. Para el límite diario. **No guarda los apuntes, ni el PDF, ni el nombre del archivo** | De un `User` y una `Subject` (`Cascade`) |
 | `Session`, `Account`, `Verification` | Tablas de Better Auth (sesiones, contraseña, enlaces de verificación) | `Session` y `Account` de un `User` |
 
 Las preguntas genéricas de autoevaluación **no están en la base**: viven en
@@ -214,11 +236,13 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
    | `BETTER_AUTH_URL` | `http://localhost:3000` (los enlaces de los correos salen de aquí) |
    | `EMBER_TEST_VIGIL_SECONDS` | Opcional: vigilias de N segundos para probar (solo en `next dev`) |
    | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Opcionales: la cuenta de Gmail que envía los correos y su contraseña de aplicación. Vacías, el correo (con el enlace) sale en la consola de `npm run dev` |
+   | `GEMINI_API_KEY`, `GEMINI_MODEL` | El escriba: la clave de Google AI Studio (secreta) y el nombre del modelo de Gemini. Vacías, la tarjeta dice «El escriba no está disponible» |
+   | `EMBER_FAKE_AGENT` | Opcional, **solo en local**: con `1`, el escriba devuelve preguntas de ejemplo sin llamar a Google. Se ignora en producción. **Nunca se configura en Vercel** |
 
 5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
    equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
    descarga la imagen. `docker compose ps` debe decir `healthy`.
-6. `npx prisma migrate deploy` crea las tablas aplicando las 12 migraciones.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 13 migraciones.
 7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
    `prueba1234`** (de desarrollo, no protege nada real) con 2 materias (5
    preguntas en Cálculo; Historia sin preguntas), 5 jefes en varios estados,
@@ -226,7 +250,10 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
    cuenta. Para comprobar el banco de preguntas:
    `node --env-file=.env --import ./scripts/alias-hooks.mjs scripts/probar-preguntas.ts`
    (tiene que terminar en "Todo bien."); el contraataque, igual con
-   `scripts/probar-contraataque.ts`.
+   `scripts/probar-contraataque.ts`; el escriba, sin gastar cuota, con
+   `EMBER_FAKE_AGENT=1` delante y `scripts/probar-escriba.ts` (con
+   `npm run dev` encendido, `--payload` comprueba también el HTML). Las
+   llamadas reales a Gemini (gastan cuota): `scripts/probar-gemini.ts`.
 8. `npm run dev` y abrir http://localhost:3000/login. Si con las variables de
    Gmail rellenas sale "unable to verify the first certificate", es un
    antivirus que intercepta el correo (en el portátil de Luis, Norton):
@@ -343,7 +370,9 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   rechaza sin tocar nada (dos pestañas). Un contraataque por vigilia (índice
   único en `studySessionId`).
 - **Las reglas del contraataque viven en `COUNTERATTACK` y
-  `counterattackSouls()`** (`lib/game.ts`): 3 preguntas; opción múltiple
+  `counterattackSouls()`** (`lib/game.ts`): 1, 2 o 3 preguntas según la
+  dificultad del jefe (`questionsByDifficulty`: fácil 1, media 2, difícil 3;
+  menos si la materia no tiene tantas); opción múltiple
   +15 / −5; verdadero o falso +10 / −10; genéricas +5 siempre; esquivar 0. **Si
   se cambian, contestar al azar tiene que seguir dando 0 de media** (¼·acierto
   + ¾·fallo y ½·acierto + ½·fallo): `scripts/probar-contraataque.ts` lo
@@ -367,7 +396,60 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   (paso 4) NO puede ganarse con preguntas genéricas**: si no, una materia sin
   preguntas daría brasa gratis.
 - **`source` de una pregunta lo pone siempre el servidor** (`MANUAL` al
-  crear a mano; al editar no se toca).
+  crear a mano, `AGENT` el escriba; al editar no se toca).
+- **El escriba (Gemini) vive entero en `lib/agent/`, y solo `gemini.ts` sabe
+  de Google** (`fetch` a la API REST de `generateContent`, sin SDK ni
+  dependencias). Sus reglas (cuántas, límites, mensajes) están en
+  `lib/agent/rules.ts`. La clave va en la cabecera `x-goog-api-key`, nunca en
+  la URL, y nunca llega al navegador.
+- **La respuesta del modelo NO es confiable:** se valida entera con
+  `prepararPreguntas()` (`lib/agent/questions.ts`), que usa las mismas reglas
+  que las preguntas a mano (`validarPregunta`), exige la explicación, descarta
+  las repetidas (en la tanda y en el banco) y recorta a 15. Las opciones de
+  opción múltiple se barajan al guardar. Lo que escribe el modelo se pinta
+  **siempre como texto de React**: nada de `dangerouslySetInnerHTML` ni de
+  interpretar Markdown o HTML.
+- **Los apuntes son datos, no instrucciones** (inyección de prompt): van
+  aparte de las reglas (`systemInstruction`), entre delimitadores con un nonce
+  aleatorio, y la regla 7 pide ignorar órdenes dentro de ellos.
+- **Privacidad del escriba:** los apuntes y el PDF solo viven en memoria
+  durante la petición. No se guardan en la base (`AgentInvocation` no tiene
+  columnas para ello), ni en disco, ni en los logs: los logs del escriba solo
+  llevan el estado HTTP y el código de error. Las pruebas reales usan apuntes
+  inventados (en la capa gratuita, Google puede usar lo que se le envía).
+- **Límite del escriba: 3 invocaciones con éxito por usuario y día de
+  Colombia.** Reservar (con el usuario bloqueado) → Gemini fuera de la
+  transacción → guardar; una `PENDING` de más de 5 minutos cuenta como
+  fallida. Las fallidas (Gemini, PDF, materia llena) no cuentan, y la materia
+  llena se comprueba **antes** de llamar a Gemini.
+- **`EMBER_FAKE_AGENT=1` solo en local:** el escriba devuelve preguntas de
+  ejemplo (con la marca `[escriba falso]`) sin llamar a Google. En producción
+  se ignora siempre. **Nunca se configura en Vercel.** `GEMINI_API_KEY` y
+  `GEMINI_MODEL` van en Vercel solo en *Production*.
+- **Una pregunta SELLADA (`Question.sealed`) no sale del servidor:** ni el
+  enunciado, ni las opciones, ni la respuesta, ni la explicación. La página
+  pide las selladas solo con `id`, `type` y `createdAt` (ni se leen), y
+  `?editar=` ignora sus ids. No se editan (`guardarEdicion` lo comprueba con
+  la fila bloqueada), solo se borran. Se revelan al contestarlas o
+  esquivarlas en un contraataque (`responderPreguntaDe`). El sello es una
+  columna, no se deduce de los intentos: editar borra los intentos y volvería
+  a sellar una revelada.
+- **Retirar una pregunta del escriba** (`retirarPreguntaDe` en
+  `lib/battle.ts`): solo una ya contestada de ese contraataque, propia y
+  `AGENT`. El navegador manda el contraataque y el número de pregunta (nunca
+  el id). Las almas de esa respuesta no cambian.
+- **PDF del escriba:** ≤ 4 MB, `application/pdf`, empieza por `%PDF-` y ≤ 40
+  páginas, contadas sin dependencias (`lib/agent/pdf.ts`). Al descomprimir
+  (`node:zlib`), topes contra bombas: 8 MB por stream (`maxOutputLength`),
+  32 MB en total y 200 streams. `serverActions.bodySizeLimit` es `4.5mb`
+  (`next.config.ts`), el máximo de cuerpo de una función de Vercel.
+- **Gemini: solo se reintenta un 503 (o `UNAVAILABLE`), una vez, tras 2 s,
+  y solo si quedan al menos 10 s de los 45 del timeout** (`GEMINI_RETRY` en
+  `lib/agent/gemini.ts`). Nunca los 429, los demás 4xx ni la red caída. La
+  invocación solo cuenta si al final sale bien.
+- **La página de una materia tiene `maxDuration = 60`:** cubre los 45 s del
+  timeout de Gemini más la base. En Next, el `maxDuration` de la página vale
+  para todas sus Server Actions.
 - **Las reglas del banco de preguntas viven en
   `lib/questions/validation.ts`** (límites, etiquetas y `validarPregunta`),
   y se validan siempre en el servidor.
@@ -415,11 +497,16 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   dos peticiones simultáneas pueden esperarse la una a la otra para siempre
   (interbloqueo). Con la fila bloqueada se puede leer, calcular en el código
   y escribir sin `increment`: nadie más la cambia hasta el final.
-  **`Subject` solo lo bloquean las acciones del banco de preguntas; nunca
-  dentro de la cadena de la batalla** (`crearPregunta` lo bloquea para contar
-  hasta 200). Lo mismo con `Question` (`editarPregunta`). Si algún día la
-  batalla necesita bloquear una de las dos, hay que meterla en la cadena y
-  revisar el orden en los dos lados.
+  **`Subject` solo lo bloquean las acciones del banco de preguntas y el
+  guardado del escriba; nunca dentro de la cadena de la batalla**
+  (`crearPregunta` y `invocarEscribaDe` lo bloquean para contar hasta 200).
+  **`Question` sí entra al final de la cadena desde el paso 3:** contestar
+  una sellada la revela (contraataque → usuario → pregunta) y retirar una
+  pregunta la borra (contraataque → pregunta). Editar (`guardarEdicion`) y
+  borrar solo bloquean la pregunta, así que no hay círculo. La reserva del
+  escriba bloquea **solo** el usuario; el guardado, **solo** la materia; nunca
+  los dos juntos. Si algún día hace falta bloquear algo más, hay que meterlo
+  en la cadena y revisar el orden en todos los lados.
 - **Transacciones cortas:** se lee con el mismo `SELECT … FOR UPDATE` lo que
   haga falta de la fila bloqueada, se calcula en el código y se escribe una
   sola vez. Cada ida y vuelta a la base alarga el bloqueo (contra la base
@@ -620,10 +707,18 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   ~2 s (dos transacciones a la vez daban `P2028`; responder usa ahora
   `maxWait: 10_000`). Si molesta, probar `127.0.0.1` en vez de `localhost`
   en el `.env` local.
-- [ ] **Fase 2 · paso 3:** el agente (`source: AGENT`) y la prioridad de las
-  preguntas que vuelven (`QuestionAttempt`).
-- [ ] Decidir si editar una pregunta del agente la convierte en `MANUAL`
-  (hoy sigue siendo `AGENT`).
+- [ ] **ANTES del push del escriba: crear en Vercel, solo en *Production*,
+  `GEMINI_API_KEY` (como *Sensitive*) y `GEMINI_MODEL`** (Luis).
+  `EMBER_FAKE_AGENT` nunca en Vercel. Después del push: mirar que el build
+  aplica `20261012010722_escriba` y probar una invocación en producción
+  (latencia, `maxDuration`).
+- [ ] Escriba: probar con lector de pantalla, en Safari y Firefox, arrastrar
+  y soltar un PDF de verdad, un PDF escaneado (solo imágenes) y uno cifrado.
+- [ ] «Añadir pregunta a mano» se queda abierto después de que el escriba
+  llene una materia que estaba vacía (su estado no se recalcula, a propósito,
+  desde el paso 1).
+- [ ] La prioridad de las preguntas que vuelven (`QuestionAttempt`): las
+  falladas hace poco, antes (TODO en `lib/questions/provider.ts`).
 - [ ] Banco de preguntas: probar el máximo de 200 con envíos simultáneos,
   con lector de pantalla y en Safari y Firefox; después del push, mirar que
   el build aplica `20261011001244_banco_preguntas` y probarlo en producción.
@@ -688,6 +783,12 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base de producción se recrea, volver a activar a mano el RLS de
   `_prisma_migrations` (en la local no hace falta: no tiene API pública).
+- [x] ~~Fase 2 · paso 3: el escriba~~ (11 oct, sin commit): preguntas con
+  Gemini desde texto o PDF, selladas hasta que un jefe las lanza, límite de 3
+  al día, «Retírala» en la batalla y contraataque según la dificultad.
+- [x] ~~Decidir si editar una pregunta del agente la convierte en `MANUAL`~~
+  (11 oct): sigue siendo `AGENT`; para que editarla no la vuelva a sellar, el
+  sello es una columna (`Question.sealed`).
 - [x] ~~Fase 2 · paso 2: el contraataque~~ (10 oct, sin commit): preguntas
   después del golpe, estado en `Counterattack`, `QuestionAttempt` (con
   `chosenIndex` comprobado dentro de las opciones), genéricas sin restar.
@@ -769,3 +870,4 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-10 | Verificación de correo (Gmail por SMTP, enlace con entrada automática, límite por cuenta, enumeración cerrada, Norton y el puerto 587) | [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md) |
 | 2026-10-10 | Fase 2 · paso 1: banco de preguntas (`Question`, `QuestionAttempt`, enums, `String[]`, `CHECK` a mano), `/materias/[id]`, proveedor único y preguntas genéricas | [2026-10-10-banco-de-preguntas.md](sesiones/2026-10-10-banco-de-preguntas.md) |
 | 2026-10-10 | Fase 2 · paso 2: el contraataque (`Counterattack` con `items` en `jsonb`, permutación con `node:crypto`, valor esperado 0, índice único por vigilia, orden de bloqueos ampliado, `lib/battle.ts`, panel modal accesible) | [2026-10-10-contraataque.md](sesiones/2026-10-10-contraataque.md) |
+| 2026-10-11 | Fase 2 · paso 3: el escriba (Gemini por `fetch`, salida estructurada, inyección de prompt, PDF en base64 con páginas contadas sin dependencias y topes contra bombas, preguntas selladas con `Question.sealed`, límite diario con reserva `PENDING`, «Retírala», contraataque según la dificultad) | [2026-10-11-el-escriba.md](sesiones/2026-10-11-el-escriba.md) |

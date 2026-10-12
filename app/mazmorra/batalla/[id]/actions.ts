@@ -9,13 +9,15 @@ import {
   comenzarVigiliaDe,
   fallo,
   responderPreguntaDe,
+  retirarPreguntaDe,
   type ResultadoBatalla,
   type ResultadoRespuesta,
+  type ResultadoRetirar,
 } from "@/lib/battle";
 
 // Solo tipos: desaparecen al compilar, así que el componente de cliente puede
 // importarlos de aquí sin cargar nada del servidor.
-export type { ResultadoBatalla, ResultadoRespuesta } from "@/lib/battle";
+export type { ResultadoBatalla, ResultadoRespuesta, ResultadoRetirar } from "@/lib/battle";
 
 // Estas acciones son la PUERTA: comprueban la sesión y que lo que se pide sea
 // del usuario, y después llaman al corazón de la batalla (lib/battle.ts), que
@@ -109,5 +111,27 @@ export async function responderPregunta(
   if (!resultado) notFound();
 
   refresh();
+  return resultado;
+}
+
+// Retira del banco la pregunta questionNumber (empieza en 0) del contraataque,
+// si es del escriba y ya se contestó. El navegador sigue sin conocer el id de
+// la pregunta: el servidor la saca de los items del contraataque. Las almas
+// de esa respuesta no cambian.
+export async function retirarPregunta(
+  counterattackId: string,
+  questionNumber: number,
+): Promise<ResultadoRetirar> {
+  const user = await requireUser();
+  if (typeof counterattackId !== "string") notFound();
+  if (!Number.isInteger(questionNumber) || questionNumber < 0) {
+    return { ok: false, error: "Esa pregunta no existe." };
+  }
+
+  const resultado = await retirarPreguntaDe(user.id, counterattackId, questionNumber);
+  // No existe o es de otro: 404, sin distinguir los dos casos.
+  if (!resultado) notFound();
+  // Sin refresh(): la pantalla no cambia (la pregunta ya estaba contestada).
+  // El banco de la materia se pinta de nuevo al visitarlo.
   return resultado;
 }

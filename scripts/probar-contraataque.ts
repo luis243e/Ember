@@ -212,7 +212,8 @@ async function probarConBase(userId: string, otherUserId: string): Promise<void>
     });
   const jefe = await tarea(conPreguntas.id, "HARD", 600);
   const casiMuerto = await tarea(conPreguntas.id, "EASY", 100);
-  const jefeGenerico = await tarea(sinPreguntas.id, "EASY", 200);
+  // Difícil: contraataca con 3 preguntas (COUNTERATTACK.questionsByDifficulty).
+  const jefeGenerico = await tarea(sinPreguntas.id, "HARD", 600);
 
   // -------------------------------------------------------------------------
   console.log("\n2. El golpe crea el contraataque");
@@ -239,8 +240,8 @@ async function probarConBase(userId: string, otherUserId: string): Promise<void>
   }
   const pub = publicQuestion((await preguntaQueToca(ca1.id)).question, items1[0].order);
   check(
-    "lo público solo lleva kind, prompt y options (ni id, ni correcta, ni explicación)",
-    same(Object.keys(pub).sort(), ["kind", "options", "prompt"]),
+    "lo público solo lleva kind, fromAgent, prompt y options (ni id, ni correcta, ni explicación)",
+    same(Object.keys(pub).sort(), ["fromAgent", "kind", "options", "prompt"]),
     Object.keys(pub),
   );
 
@@ -335,7 +336,7 @@ async function probarConBase(userId: string, otherUserId: string): Promise<void>
   await asestarGolpeDe(userId, jefeGenerico);
   const ca3 = await contraataqueDe(v3.id);
   const items3 = ca3 ? parseItems(ca3.items) : [];
-  check("materia sin preguntas → 3 genéricas", items3.length === 3 && items3.every((i) => i.ref.startsWith("generic:")), items3);
+  check("materia sin preguntas, jefe difícil → 3 genéricas", items3.length === 3 && items3.every((i) => i.ref.startsWith("generic:")), items3);
   if (!ca3) throw new Error("Sin contraataque genérico no se puede seguir.");
   const g0 = ok(await responderPreguntaDe(userId, ca3.id, 0, 0));
   const g1 = ok(await responderPreguntaDe(userId, ca3.id, 1, 1));

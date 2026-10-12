@@ -8,10 +8,12 @@ import { cn } from "@/lib/cn";
 
 type Props = {
   questionId: string;
-  // "Acertada 3 de 4 veces" o "Aún no ha salido en un contraataque".
+  // "Acertada 3 de 4 veces", "Aún no ha salido en un contraataque" o, en una
+  // sellada, "Escrita por el escriba hoy".
   stats: string;
-  // /materias/<id>?editar=<id>#formulario
-  editHref: string;
+  // /materias/<id>?editar=<id>#formulario, o null en una sellada (no se
+  // puede editar, solo borrar).
+  editHref: string | null;
 };
 
 const FOCUS_RING =
@@ -25,7 +27,8 @@ const TEXT_BUTTON = cn(
   FOCUS_RING,
 );
 
-// Pie de una tarjeta del banco: estadística, Editar y Borrar. Borrar pide
+// Pie de una tarjeta del banco: estadística, Editar (salvo en las selladas) y
+// Borrar. Borrar pide
 // confirmación aquí mismo (nada de confirm() del navegador): el pie se
 // convierte en la pregunta "¿Borrar esta pregunta?" con dos botones.
 export function AccionesPregunta({ questionId, stats, editHref }: Props) {
@@ -80,9 +83,11 @@ export function AccionesPregunta({ questionId, stats, editHref }: Props) {
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <p className="min-w-0 text-xs leading-[1.45] text-smoke">{stats}</p>
       <div className="ml-auto flex items-center gap-2">
-        <Link href={editHref} className={cn(TEXT_BUTTON, "-my-2.5 text-gold-bright hover:text-parchment")}>
-          Editar
-        </Link>
+        {editHref && (
+          <Link href={editHref} className={cn(TEXT_BUTTON, "-my-2.5 text-gold-bright hover:text-parchment")}>
+            Editar
+          </Link>
+        )}
         <button
           ref={borrarRef}
           type="button"

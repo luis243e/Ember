@@ -3,12 +3,13 @@
 import { Check, X } from "lucide-react";
 import { useEffect, useRef, useState, useTransition, type KeyboardEvent, type RefObject } from "react";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { COUNTERATTACK, type CounterattackKind } from "@/lib/game";
 import type { PublicQuestion } from "@/lib/questions/types";
 import { formatNumber } from "@/lib/text";
-import { responderPregunta, type ResultadoRespuesta } from "./actions";
+import { responderPregunta, retirarPregunta, type ResultadoRespuesta } from "./actions";
 
 // La pregunta que toca, tal como llega del servidor (page.tsx). number empieza
 // en 0. question null = se borró del banco a mitad del contraataque.
@@ -161,9 +162,12 @@ export function CounterattackPanel({
                   >
                     {boss.article} {boss.name} contraataca
                   </h2>
-                  <p className="text-[13px] leading-[normal] font-semibold text-smoke">
-                    Pregunta {current.number + 1} de {current.total}
-                  </p>
+                  <div className="flex items-center gap-2.5">
+                    {current.question?.fromAgent && <Badge className="px-2">Del agente</Badge>}
+                    <p className="text-[13px] leading-[normal] font-semibold text-smoke">
+                      Pregunta {current.number + 1} de {current.total}
+                    </p>
+                  </div>
                 </div>
 
                 <h3
@@ -186,6 +190,13 @@ export function CounterattackPanel({
                     result={revealed.result}
                     explanationRef={explanationRef}
                     onNext={next}
+                    retire={
+                      // Solo en las del escriba que se acaban de contestar
+                      // (las saltadas ya no existen).
+                      revealed.snapshot.question?.fromAgent && revealed.result.outcome !== "skipped"
+                        ? { counterattackId: revealed.snapshot.id, questionNumber: revealed.snapshot.number }
+                        : null
+                    }
                   />
                 ) : current.question ? (
                   <QuestionView question={current.question} pending={pending} onAnswer={answer} />
@@ -296,12 +307,15 @@ function RevealedView({
   result,
   explanationRef,
   onNext,
+  retire,
 }: {
   question: PublicQuestion | null;
   chosen: number | null;
   result: Answered;
   explanationRef: RefObject<HTMLDivElement | null>;
   onNext: () => void;
+  // La pregunta se puede retirar (es del escriba): con qué se pide.
+  retire: { counterattackId: string; questionNumber: number } | null;
 }) {
   const verdict = VERDICTS[result.outcome];
   // Las almas que se enseñan junto a la opción elegida, o en la explicación
@@ -385,14 +399,135 @@ function RevealedView({
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={onNext}
-        className={cn(buttonStyles({ size: "md" }), "w-full cursor-pointer self-end @md:w-auto")}
-      >
-        {result.summary ? "Ver resumen" : "Siguiente"}
-      </button>
+      {/* Pie: "Retírala" a la izquierda (solo del escriba) y SIGUIENTE a la
+          derecha. En móvil, uno encima del otro. key: se reinicia con cada
+          pregunta. */}
+      <div className="flex flex-col gap-3 @md:flex-row @md:items-end @md:justify-between">
+        {retire ? <RetirarPregunta key={retire.questionNumber} {...retire} /> : <span aria-hidden />}
+        <button
+          type="button"
+          onClick={onNext}
+          className={cn(buttonStyles({ size: "md" }), "w-full shrink-0 cursor-pointer @md:w-auto")}
+        >
+          {result.summary ? "Ver resumen" : "Siguiente"}
+        </button>
+      </div>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+//  Retirar una pregunta del escriba (108:84)
+// ---------------------------------------------------------------------------
+
+// "¿Está mal esta pregunta? Retírala". Pide confirmación en el propio pie
+// (nada de confirm() del navegador) y la borra del banco. Las almas de esta
+// respuesta no cambian. El navegador manda el contraataque y el número de
+// pregunta; cuál es la pregunta lo sabe solo el servidor.
+function RetirarPregunta({
+  counterattackId,
+  questionNumber,
+}: {
+  counterattackId: string;
+  questionNumber: number;
+}) {
+  const [view, setView] = useState<"link" | "confirm" | "done">("link");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const linkRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const doneRef = useRef<HTMLParagraphElement>(null);
+  // Si el foco tiene que volver al enlace al cancelar (y no al montar).
+  const backToLink = useRef(false);
+
+  // El botón con el foco desaparece al cambiar de vista: el foco se lleva al
+  // equivalente. Al confirmar, a "Cancelar" (lo seguro); al cancelar, al
+  // enlace; al terminar, al aviso.
+  useEffect(() => {
+    if (view === "confirm") cancelRef.current?.focus();
+    else if (view === "done") doneRef.current?.focus();
+    else if (backToLink.current) {
+      backToLink.current = false;
+      linkRef.current?.focus();
+    }
+  }, [view]);
+
+  function confirm() {
+    if (pending) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        const result = await retirarPregunta(counterattackId, questionNumber);
+        if (result.ok) setView("done");
+        else setError(result.error);
+      } catch {
+        setError("No se ha podido retirar. Inténtalo de nuevo.");
+      }
+    });
+  }
+
+  if (view === "done") {
+    return (
+      <p
+        ref={doneRef}
+        tabIndex={-1}
+        role="status"
+        className={cn("rounded-sm text-[13px] leading-[normal] text-ash", FOCUS_RING)}
+      >
+        Retirada del banco. No volverá a salir.
+      </p>
+    );
+  }
+
+  if (view === "confirm") {
+    return (
+      <div className="flex min-w-0 flex-col gap-2.5 rounded-md border border-blood bg-blood/16 px-3.5 py-3">
+        <p className="text-sm leading-[1.45] text-parchment">¿Retirar del banco? No volverá a salir.</p>
+        {error && <Alert>{error}</Alert>}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <button
+            type="button"
+            onClick={confirm}
+            aria-disabled={pending || undefined}
+            className={cn(
+              "inline-flex h-11 cursor-pointer items-center rounded-md bg-blood px-4 text-sm leading-none font-semibold text-parchment transition-colors hover:bg-blood/80 aria-disabled:cursor-wait aria-disabled:opacity-60",
+              FOCUS_RING,
+            )}
+          >
+            {pending ? "Retirando..." : "Sí, retirar"}
+          </button>
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={() => {
+              backToLink.current = true;
+              setError(null);
+              setView("link");
+            }}
+            className={cn(
+              "inline-flex h-11 cursor-pointer items-center rounded-sm px-2 text-sm leading-none font-semibold text-ash transition-colors hover:text-parchment",
+              FOCUS_RING,
+            )}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      ref={linkRef}
+      type="button"
+      onClick={() => setView("confirm")}
+      className={cn(
+        "-mx-1 inline-flex min-h-11 cursor-pointer items-center self-start rounded-sm px-1 text-left text-[13px] leading-[normal] font-semibold text-ash underline underline-offset-2 transition-colors hover:text-parchment @md:self-auto",
+        FOCUS_RING,
+      )}
+    >
+      ¿Está mal esta pregunta? Retírala
+    </button>
   );
 }
 

@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { loadRedemption } from "@/lib/redemption";
 import { QUESTION_TYPE_LABELS, type QuestionDraft } from "@/lib/questions/validation";
+import { invocacionesRestantes } from "@/lib/agent/invocation";
+import { parseDateInput, todayInAppTimeZone } from "@/lib/dates";
 import { AppShell } from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,7 +15,16 @@ import { Eyebrow } from "@/components/ui/eyebrow";
 import { cn } from "@/lib/cn";
 import { formatNumber } from "@/lib/text";
 import { AccionesPregunta } from "./acciones-pregunta";
+import { AvisoEscriba, EscribaProvider } from "./escriba-context";
+import { EscribaForm } from "./escriba-form";
 import { BloquePregunta } from "./pregunta-form";
+
+// Tiempo máximo de esta página y de TODAS sus Server Actions en Vercel (ver
+// node_modules/next/dist/docs/.../route-segment-config/maxDuration.md). El
+// escriba espera a Gemini hasta 45 s (AGENT.timeoutMs) y después guarda;
+// 60 s deja margen. Con fluid compute el valor por defecto de Vercel ya es
+// 300 s: esto deja escrito el tope que esperamos sin depender de él.
+export const maxDuration = 60;
 
 // La materia, solo si es del usuario. cache(): generateMetadata y la página
 // la piden en la misma petición y así la base se consulta una vez.
@@ -56,10 +67,76 @@ function statsText(stats: Stats | undefined): string {
   return `Acertada ${formatNumber(stats.aciertos)} de ${formatNumber(stats.total)} ${veces}${ultima}`;
 }
 
-function countText(count: number): string {
+// "21 preguntas, 9 de ellas selladas. Los jefes de esta materia te las harán
+// al contraatacar."
+function countText(count: number, sealed: number): string {
   if (count === 0) return "Aún no tiene preguntas.";
   const preguntas = count === 1 ? "1 pregunta" : `${formatNumber(count)} preguntas`;
-  return `${preguntas}. Los jefes de esta materia te las harán al contraatacar.`;
+  const selladas =
+    sealed === 0
+      ? ""
+      : sealed === count
+        ? count === 1
+          ? ", sellada"
+          : ", todas selladas"
+        : `, ${formatNumber(sealed)} de ellas ${sealed === 1 ? "sellada" : "selladas"}`;
+  return `${preguntas}${selladas}. Los jefes de esta materia te las harán al contraatacar.`;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const shortDateFormatter = new Intl.DateTimeFormat("es-CO", {
+  timeZone: "America/Bogota",
+  day: "numeric",
+  month: "long",
+});
+
+// "Escrita por el escriba hoy", "ayer" o "el 3 de octubre", con los días de
+// Colombia. Recibe "hoy" para que el componente no lea el reloj.
+function writtenText(createdAt: Date, today: string): string {
+  const created = parseDateInput(todayInAppTimeZone(createdAt));
+  const now = parseDateInput(today);
+  const days = created && now ? Math.round((now.getTime() - created.getTime()) / DAY_MS) : null;
+  if (days === 0) return "Escrita por el escriba hoy";
+  if (days === 1) return "Escrita por el escriba ayer";
+  return `Escrita por el escriba el ${shortDateFormatter.format(createdAt)}`;
+}
+
+// Las preguntas del banco en DOS consultas. Las SELLADAS se piden solo con su
+// id, su tipo y su fecha: su enunciado, sus opciones, su respuesta y su
+// explicación no se leen de la base, así que no pueden acabar en el HTML ni en
+// el payload de React por un descuido. Se juntan en el mismo orden de antes:
+// la más nueva primero (id de desempate: dos creadas en el mismo milisegundo
+// salen siempre igual).
+async function loadQuestions(subjectId: string) {
+  const [revealed, sealed] = await Promise.all([
+    prisma.question.findMany({
+      where: { subjectId, sealed: false },
+      select: {
+        id: true,
+        type: true,
+        source: true,
+        prompt: true,
+        options: true,
+        correctIndex: true,
+        explanation: true,
+        createdAt: true,
+      },
+    }),
+    prisma.question.findMany({
+      where: { subjectId, sealed: true },
+      select: { id: true, type: true, createdAt: true },
+    }),
+  ]);
+  const questions = [
+    ...revealed.map((question) => ({ ...question, sealed: false as const })),
+    ...sealed.map((question) => ({ ...question, sealed: true as const })),
+  ].sort(
+    (a, b) =>
+      b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+  );
+  // "Hoy" se toma aquí, fuera del componente: un componente de React debe dar
+  // siempre lo mismo con los mismos datos.
+  return { questions, revealed, sealedCount: sealed.length, today: todayInAppTimeZone() };
 }
 
 export default async function MateriaPage({ params, searchParams }: PageProps<"/materias/[id]">) {
@@ -71,31 +148,20 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
   const subject = await getSubject(id, sessionUser.id);
   if (!subject) notFound();
 
-  const [{ user, notices }, questions, stats] = await Promise.all([
-    loadRedemption(sessionUser),
-    // La más nueva primero. id de desempate: dos creadas en el mismo
-    // milisegundo salen siempre en el mismo orden.
-    prisma.question.findMany({
-      where: { subjectId: subject.id },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: {
-        id: true,
-        type: true,
-        source: true,
-        prompt: true,
-        options: true,
-        correctIndex: true,
-        explanation: true,
-      },
-    }),
-    loadStats(subject.id, sessionUser.id),
-  ]);
+  const [{ user, notices }, { questions, revealed, sealedCount, today }, stats, remaining] =
+    await Promise.all([
+      loadRedemption(sessionUser),
+      loadQuestions(subject.id),
+      loadStats(subject.id, sessionUser.id),
+      invocacionesRestantes(sessionUser.id),
+    ]);
 
-  // ?editar=<id>: solo si es una pregunta de ESTA materia (ya están todas
-  // cargadas). Un id ajeno, borrado o repetido (?editar=a&editar=b) se ignora
-  // y queda el formulario de crear.
+  // ?editar=<id>: solo si es una pregunta REVELADA de ESTA materia (ya están
+  // todas cargadas). Un id ajeno, borrado, repetido (?editar=a&editar=b) o de
+  // una sellada se ignora y queda el formulario de crear: una sellada no se
+  // edita, y el formulario la enseñaría.
   const editada =
-    typeof editar === "string" ? questions.find((question) => question.id === editar) : undefined;
+    typeof editar === "string" ? revealed.find((question) => question.id === editar) : undefined;
   const edicion = editada
     ? {
         id: editada.id,
@@ -118,94 +184,138 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
       user={user}
       notices={notices}
       title={subject.name}
-      description={countText(questions.length)}
+      description={countText(questions.length, sealedCount)}
       back={{ href: "/materias", label: "Mis materias" }}
     >
       {/* Una columna hasta xl. Desde xl, dos: el banco (lo principal) a la
-          izquierda y el formulario a la derecha. En el HTML el formulario va
-          primero: en móvil se ve arriba (cerrado ocupa una línea) y el orden
-          del teclado coincide en todos los tamaños. */}
-      <div className="flex flex-col gap-7 xl:grid xl:grid-cols-[minmax(0,1fr)_380px] xl:items-start xl:gap-8">
-        {/* sticky: en escritorio el formulario se queda a la vista al bajar
-            por la lista (útil al editar una pregunta de abajo). */}
-        <div className="min-w-0 xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1">
-          <BloquePregunta
-            subjectId={subject.id}
-            edicion={edicion}
-            abiertoInicial={questions.length === 0 || edicion !== null}
-          />
+          izquierda y, a la derecha, la tarjeta del escriba y el formulario
+          manual. En el HTML la columna derecha va primero: en móvil el
+          escriba se ve arriba y el orden del teclado coincide en todos los
+          tamaños. EscribaProvider: la tarjeta y el aviso de éxito (encima del
+          banco) comparten estado. */}
+      <EscribaProvider>
+        <div className="flex flex-col gap-7 xl:grid xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start xl:gap-6">
+          <div className="flex min-w-0 flex-col gap-4 xl:col-start-2 xl:row-start-1">
+            <EscribaForm subjectId={subject.id} remaining={remaining} />
+            {/* Plegado salvo si la materia está vacía o se está editando. */}
+            <BloquePregunta
+              subjectId={subject.id}
+              edicion={edicion}
+              abiertoInicial={questions.length === 0 || edicion !== null}
+            />
+          </div>
+
+          <section
+            aria-labelledby="banco"
+            className="flex min-w-0 flex-col gap-3 xl:col-start-1 xl:row-start-1"
+          >
+            <Eyebrow id="banco">Banco de preguntas · {formatNumber(questions.length)}</Eyebrow>
+            <AvisoEscriba />
+
+            {questions.length === 0 ? (
+              <EmptyState icon={<MessageCircleQuestion size={40} />} title="Aún no hay preguntas">
+                Invoca al escriba con tus apuntes o escribe la primera a mano. Mientras esta materia no
+                tenga preguntas, sus jefes contraatacarán con preguntas de autoevaluación.
+              </EmptyState>
+            ) : (
+              <>
+                <ul className="flex flex-col gap-3">
+                  {questions.map((question) => {
+                    if (question.sealed) {
+                      return (
+                        <TarjetaSellada
+                          key={question.id}
+                          id={question.id}
+                          typeLabel={QUESTION_TYPE_LABELS[question.type]}
+                          subjectName={subject.name}
+                          written={writtenText(question.createdAt, today)}
+                        />
+                      );
+                    }
+                    const questionStats = stats.get(question.id);
+                    // Vuelve pronto: el último intento fue un fallo.
+                    const vuelvePronto = questionStats !== undefined && !questionStats.ultimaCorrecta;
+                    const isEditing = question.id === edicion?.id;
+                    return (
+                      <li
+                        key={question.id}
+                        // Como cardStyles, pero con el borde dorado en la que se
+                        // está editando (cn no resolvería border-line contra
+                        // border-gold-bright).
+                        className={cn(
+                          "flex flex-col gap-3 rounded-[10px] border bg-surface px-5 py-4",
+                          isEditing ? "border-gold-bright" : "border-line",
+                        )}
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          <Badge>{QUESTION_TYPE_LABELS[question.type]}</Badge>
+                          {question.source === "AGENT" && <Badge>Del agente</Badge>}
+                          {vuelvePronto && (
+                            <Badge tone="ember">Vuelve pronto</Badge>
+                          )}
+                          {isEditing && <Badge tone="muted">Editando</Badge>}
+                        </div>
+                        {/* whitespace-pre-line: respeta los saltos de línea del
+                            enunciado. wrap-anywhere: una palabra larga sin
+                            espacios no desborda la tarjeta. */}
+                        <p className="text-base leading-[1.4] font-semibold whitespace-pre-line wrap-anywhere text-parchment">
+                          {question.prompt}
+                        </p>
+                        <p className="flex items-start gap-2 text-sm leading-[1.45] text-ash">
+                          <Check aria-hidden size={16} className="mt-0.5 shrink-0 text-smoke" />
+                          <span className="min-w-0 wrap-anywhere">
+                            <span className="sr-only">Respuesta correcta: </span>
+                            {question.options[question.correctIndex]}
+                          </span>
+                        </p>
+                        <AccionesPregunta
+                          questionId={question.id}
+                          stats={statsText(questionStats)}
+                          editHref={`/materias/${subject.id}?editar=${question.id}#formulario`}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="text-[13px] leading-[1.5] text-smoke">
+                  Si una materia no tiene preguntas, sus jefes contraatacan con preguntas de
+                  autoevaluación.
+                </p>
+              </>
+            )}
+          </section>
         </div>
-
-        <section
-          aria-labelledby="banco"
-          className="flex min-w-0 flex-col gap-3 xl:col-start-1 xl:row-start-1"
-        >
-          <Eyebrow id="banco">Banco de preguntas · {formatNumber(questions.length)}</Eyebrow>
-
-          {questions.length === 0 ? (
-            <EmptyState icon={<MessageCircleQuestion size={40} />} title="Aún no hay preguntas">
-              Escribe la primera con el formulario. Mientras esta materia no tenga preguntas, sus
-              jefes contraatacarán con preguntas de autoevaluación.
-            </EmptyState>
-          ) : (
-            <>
-              <ul className="flex flex-col gap-3">
-                {questions.map((question) => {
-                  const questionStats = stats.get(question.id);
-                  // Vuelve pronto: el último intento fue un fallo.
-                  const vuelvePronto = questionStats !== undefined && !questionStats.ultimaCorrecta;
-                  const isEditing = question.id === edicion?.id;
-                  return (
-                    <li
-                      key={question.id}
-                      // Como cardStyles, pero con el borde dorado en la que se
-                      // está editando (cn no resolvería border-line contra
-                      // border-gold-bright).
-                      className={cn(
-                        "flex flex-col gap-3 rounded-[10px] border bg-surface px-5 py-4",
-                        isEditing ? "border-gold-bright" : "border-line",
-                      )}
-                    >
-                      <div className="flex flex-wrap gap-2">
-                        <Badge>{QUESTION_TYPE_LABELS[question.type]}</Badge>
-                        {question.source === "AGENT" && (
-                          <Badge tone="muted">Del agente</Badge>
-                        )}
-                        {vuelvePronto && (
-                          <Badge tone="ember">Vuelve pronto</Badge>
-                        )}
-                        {isEditing && <Badge tone="muted">Editando</Badge>}
-                      </div>
-                      {/* whitespace-pre-line: respeta los saltos de línea del
-                          enunciado. wrap-anywhere: una palabra larga sin
-                          espacios no desborda la tarjeta. */}
-                      <p className="text-base leading-[1.4] font-semibold whitespace-pre-line wrap-anywhere text-parchment">
-                        {question.prompt}
-                      </p>
-                      <p className="flex items-start gap-2 text-sm leading-[1.45] text-ash">
-                        <Check aria-hidden size={16} className="mt-0.5 shrink-0 text-smoke" />
-                        <span className="min-w-0 wrap-anywhere">
-                          <span className="sr-only">Respuesta correcta: </span>
-                          {question.options[question.correctIndex]}
-                        </span>
-                      </p>
-                      <AccionesPregunta
-                        questionId={question.id}
-                        stats={statsText(questionStats)}
-                        editHref={`/materias/${subject.id}?editar=${question.id}#formulario`}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-              <p className="text-[13px] leading-[1.5] text-smoke">
-                Si una materia no tiene preguntas, sus jefes contraatacan con preguntas de
-                autoevaluación.
-              </p>
-            </>
-          )}
-        </section>
-      </div>
+      </EscribaProvider>
     </AppShell>
+  );
+}
+
+// Una pregunta SELLADA del escriba (Figma 107:141): sin enunciado, sin
+// opciones y sin respuesta, porque el servidor ni las ha leído. Solo se puede
+// borrar.
+function TarjetaSellada({
+  id,
+  typeLabel,
+  subjectName,
+  written,
+}: {
+  id: string;
+  typeLabel: string;
+  subjectName: string;
+  written: string;
+}) {
+  return (
+    <li className="flex flex-col gap-3 rounded-[10px] border border-dashed border-line bg-surface px-5 py-4">
+      <div className="flex flex-wrap gap-2">
+        <Badge>{typeLabel}</Badge>
+        <Badge>Del agente</Badge>
+        <Badge tone="smoke">Sellada</Badge>
+      </div>
+      <p className="text-[15px] leading-[1.4] font-semibold text-ash">Pregunta sellada</p>
+      <p className="text-sm leading-[1.45] wrap-anywhere text-smoke">
+        La descubrirás cuando un jefe de {subjectName} contraataque.
+      </p>
+      <AccionesPregunta questionId={id} stats={written} editHref={null} />
+    </li>
   );
 }

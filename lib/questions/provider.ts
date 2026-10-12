@@ -1,8 +1,8 @@
 // El proveedor de preguntas: el ÚNICO punto por donde el combate pide
-// preguntas. Hoy sale del banco de la materia (preguntas escritas a mano); en
-// el paso 3 también de las que genere el agente desde los apuntes. Como todo
-// pasa por aquí, cambiar de dónde salen o en qué orden no obliga a tocar la
-// batalla.
+// preguntas. Salen del banco de la materia: las escritas a mano y las del
+// escriba, también las SELLADAS (lanzarlas es justo lo que las revela). Como
+// todo pasa por aquí, cambiar de dónde salen o en qué orden no obliga a tocar
+// la batalla.
 //
 // SOLO del servidor: lee la base y devuelve las respuestas correctas.
 import { prisma } from "@/lib/prisma";
@@ -23,6 +23,8 @@ function shuffled<T>(items: readonly T[]): T[] {
 }
 
 // Preguntas para un contraataque de un jefe de la materia subjectId.
+// `cantidad` la decide la dificultad del jefe (COUNTERATTACK en lib/game.ts);
+// no tiene valor por defecto para que nadie se olvide de pasarla.
 //
 // - Al azar entre las de la materia, sin repetir dentro del mismo
 //   contraataque. Si hay menos que `cantidad`, devuelve las que haya.
@@ -44,7 +46,7 @@ function shuffled<T>(items: readonly T[]): T[] {
 export async function preguntasParaContraataque(
   userId: string,
   subjectId: string,
-  cantidad = 3,
+  cantidad: number,
 ): Promise<BattleQuestion[]> {
   const subject = await prisma.subject.findFirst({
     where: { id: subjectId, userId },

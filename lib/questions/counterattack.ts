@@ -32,6 +32,10 @@ export type ResolvedQuestion = {
   options: string[];
   correctIndex: number;
   explanation: string | null;
+  // La escribió el escriba (la pantalla enseña "Del agente").
+  fromAgent: boolean;
+  // Sigue sellada: nadie la ha contestado todavía. Al contestarla se revela.
+  sealed: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -134,12 +138,23 @@ export async function resolveItem(
       options: [...generic.options],
       correctIndex: generic.correctIndex,
       explanation: generic.explanation,
+      fromAgent: false,
+      sealed: false,
     };
   }
 
   const question = await db.question.findUnique({
     where: { id: item.ref },
-    select: { id: true, type: true, prompt: true, options: true, correctIndex: true, explanation: true },
+    select: {
+      id: true,
+      type: true,
+      source: true,
+      sealed: true,
+      prompt: true,
+      options: true,
+      correctIndex: true,
+      explanation: true,
+    },
   });
   if (!question || question.options.length !== item.order.length) return null;
   return {
@@ -149,13 +164,18 @@ export async function resolveItem(
     options: question.options,
     correctIndex: question.correctIndex,
     explanation: question.explanation,
+    fromAgent: question.source === "AGENT",
+    sealed: question.sealed,
   };
 }
 
-// Lo único que viaja al navegador: enunciado y opciones en el orden mostrado.
+// Lo único que viaja al navegador: enunciado y opciones en el orden mostrado,
+// y si es del escriba (para la etiqueta y el enlace "Retírala"). Mostrarla en
+// el contraataque es justo "lanzarla": se revela al contestarla.
 export function publicQuestion(question: ResolvedQuestion, order: readonly number[]): PublicQuestion {
   return {
     kind: question.kind,
+    fromAgent: question.fromAgent,
     prompt: question.prompt,
     options: order.map((i) => question.options[i]),
   };

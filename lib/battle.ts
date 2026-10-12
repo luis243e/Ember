@@ -11,6 +11,8 @@
 //
 // ORDEN DE BLOQUEO, en todas las transacciones de la app:
 //   tarea → vigilia → contraataque → usuario → misión de redención.
+// Al contestar una pregunta sellada, su fila va al final (contraataque →
+// usuario → pregunta); al retirarla, contraataque → pregunta.
 // Quien no necesite alguna fila se la salta, pero nunca cambia el orden: así
 // dos peticiones simultáneas se ponen en fila en vez de esperarse la una a la
 // otra para siempre (interbloqueo). La revisión de jefes vencidos
@@ -194,9 +196,10 @@ export async function asestarGolpeDe(
   const now = new Date();
 
   // La transacción devuelve el resultado y, si hay contraataque, la vigilia
-  // cerrada a la que pertenecerá.
-  type Golpe = { resultado: ResultadoBatalla; studySessionId?: string };
-  const { resultado, studySessionId } = await prisma.$transaction(async (tx): Promise<Golpe> => {
+  // cerrada a la que pertenecerá y la dificultad del jefe (decide cuántas
+  // preguntas lanza).
+  type Golpe = { resultado: ResultadoBatalla; studySessionId?: string; difficulty?: Difficulty };
+  const { resultado, studySessionId, difficulty } = await prisma.$transaction(async (tx): Promise<Golpe> => {
     // 1. Primero la tarea (mismo orden que comenzarVigilia). NO se mira la
     // fecha de entrega: una vigilia que empezó a tiempo y cruzó la medianoche
     // se puede golpear (la revisión no marca un jefe con vigilia abierta).
@@ -299,6 +302,7 @@ export async function asestarGolpeDe(
       },
       // El contraataque solo si el jefe sigue vivo: si cayó, no contraataca.
       studySessionId: defeated ? undefined : closed[0].id,
+      difficulty: locked.difficulty,
     };
     // timeout: con la misión son hasta nueve viajes a la base (~250 ms cada
     // uno desde local), más la espera si la revisión de jefes vencidos tiene
@@ -308,18 +312,30 @@ export async function asestarGolpeDe(
   // 6. El contraataque, FUERA de la transacción y después de que el golpe ya
   // cuenta: si algo falla aquí, el golpe y sus almas no se pierden; solo no
   // hay preguntas esta vez.
-  if (studySessionId) await crearContraataque(userId, task.subjectId, studySessionId);
+  if (studySessionId && difficulty) {
+    await crearContraataque(userId, task.subjectId, studySessionId, difficulty);
+  }
 
   return resultado;
 }
 
-// Crea el contraataque de una vigilia recién golpeada. Nunca lanza: registra
-// el error y sigue. El índice único de studySessionId impide un segundo
-// contraataque para la misma vigilia (P2002), aunque esto se llamara dos
-// veces.
-async function crearContraataque(userId: string, subjectId: string, studySessionId: string) {
+// Crea el contraataque de una vigilia recién golpeada, con tantas preguntas
+// como diga la dificultad del jefe (fácil 1, media 2, difícil 3). Nunca lanza:
+// registra el error y sigue. El índice único de studySessionId impide un
+// segundo contraataque para la misma vigilia (P2002), aunque esto se llamara
+// dos veces.
+async function crearContraataque(
+  userId: string,
+  subjectId: string,
+  studySessionId: string,
+  difficulty: Difficulty,
+) {
   try {
-    const questions = await preguntasParaContraataque(userId, subjectId, COUNTERATTACK.questions);
+    const questions = await preguntasParaContraataque(
+      userId,
+      subjectId,
+      COUNTERATTACK.questionsByDifficulty[difficulty],
+    );
     if (questions.length === 0) return;
     await prisma.counterattack.create({
       data: { studySessionId, userId, items: buildItems(questions) },
@@ -439,8 +455,18 @@ export async function responderPreguntaDe(
 
       // 4. El intento, solo con preguntas del banco (las genéricas no están
       // en la base). Esquivar se guarda como no acertada: el paso 3 la hará
-      // volver antes.
+      // volver antes. Si la pregunta era del escriba y seguía SELLADA, aquí
+      // se revela: desde ahora el banco enseña su enunciado y su respuesta.
+      // Bloquea la fila de la pregunta DESPUÉS del contraataque y del usuario
+      // (contraataque → usuario → pregunta); editar y borrar una pregunta
+      // solo bloquean la pregunta, así que no pueden esperarse en círculo.
       if (question?.questionId) {
+        if (question.sealed) {
+          await tx.question.updateMany({
+            where: { id: question.questionId, sealed: true },
+            data: { sealed: false },
+          });
+        }
         await tx.questionAttempt.create({
           data: {
             questionId: question.questionId,
@@ -493,4 +519,51 @@ export async function responderPreguntaDe(
     }
     throw error;
   }
+}
+
+// ---------------------------------------------------------------------------
+//  Retirar una pregunta del escriba
+// ---------------------------------------------------------------------------
+
+export type ResultadoRetirar = { ok: true } | { ok: false; error: string };
+
+// Retira (borra del banco) la pregunta número `questionNumber` del
+// contraataque, si está mal escrita. El navegador no conoce el id de la
+// pregunta: la saca el servidor de items. Solo se puede si:
+//   - el contraataque es de ese usuario (si no, null: la acción responde 404);
+//   - esa pregunta ya se contestó (o se esquivó) en ESTE contraataque:
+//     questionNumber < answered. Vale también con el contraataque terminado,
+//     porque la última se contesta y lo termina;
+//   - es del banco (no genérica), del escriba (AGENT) y de una materia del
+//     usuario.
+// Las almas de esa respuesta NO cambian: se quedan en el usuario y en
+// Counterattack.soulsDelta. Sus intentos se van con ella (Cascade).
+export async function retirarPreguntaDe(
+  userId: string,
+  counterattackId: string,
+  questionNumber: number,
+): Promise<ResultadoRetirar | null> {
+  return prisma.$transaction(async (tx): Promise<ResultadoRetirar | null> => {
+    // Bloqueado: si a la vez se está contestando, answered ya es el bueno.
+    const counter = await bloquearContraataque(tx, counterattackId, userId);
+    if (!counter) return null;
+    if (!Number.isInteger(questionNumber) || questionNumber < 0 || questionNumber >= counter.answered) {
+      return { ok: false, error: "Solo puedes retirar una pregunta que ya has contestado." };
+    }
+    const item = parseItems(counter.items)[questionNumber];
+    if (!item) return { ok: false, error: "Esa pregunta no existe." };
+
+    // findFirst con todas las condiciones: una genérica ("generic:..."), una
+    // MANUAL o una de otro usuario no se encuentran y no se toca nada.
+    const question = await tx.question.findFirst({
+      where: { id: item.ref, source: "AGENT", subject: { userId } },
+      select: { id: true },
+    });
+    if (!question) {
+      return { ok: false, error: "Solo se pueden retirar preguntas del escriba que sigan en el banco." };
+    }
+    // deleteMany: si otra pestaña ya la borró, no falla.
+    await tx.question.deleteMany({ where: { id: question.id } });
+    return { ok: true };
+  }, { timeout: 15_000, maxWait: 10_000 });
 }
