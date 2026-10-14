@@ -145,6 +145,12 @@ model User {
   // encendida (reglas en lib/game.ts). null = nunca ha golpeado.
   lastStrikeDay DateTime?
 
+  // "Brasas": comodines que salvan la llama si un día no se golpea. De 0 a 2
+  // (EMBER en lib/game.ts; un CHECK de la migración 20261014194417_brasa
+  // impide salirse). Se ganan al terminar un contraataque perfecto contra un
+  // jefe medio o difícil y se gastan solas al golpear (lib/battle.ts).
+  embers       Int      @default(0)
+
   // --- Límite de correos de acceso (lib/auth-emails.ts) ---
   // Último correo enviado a esta cuenta (verificación o "ya tienes una
   // cuenta"). null = nunca. Como mucho uno por minuto.
@@ -582,6 +588,11 @@ model Counterattack {
   // cualquier cosa, se valida SIEMPRE al leerlo (parseItems en
   // lib/questions/counterattack.ts).
   items          Json
+
+  // Dificultad del jefe al crear el contraataque: decide si da brasa
+  // (EMBER en lib/game.ts). null = se creó antes de que existiera esta
+  // columna: sigue funcionando, pero no da brasa.
+  bossDifficulty Difficulty?
 
   // Preguntas ya contestadas (o esquivadas, o saltadas). La que toca es
   // items[answered].

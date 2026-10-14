@@ -6,7 +6,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { COUNTERATTACK, type CounterattackKind } from "@/lib/game";
+import { COUNTERATTACK, EMBER, type CounterattackKind } from "@/lib/game";
 import type { PublicQuestion } from "@/lib/questions/types";
 import { formatNumber } from "@/lib/text";
 import { responderPregunta, retirarPregunta, type ResultadoRespuesta } from "./actions";
@@ -547,7 +547,7 @@ const VERDICTS: Record<Answered["outcome"], { title: string; className: string }
 };
 
 // ---------------------------------------------------------------------------
-//  El resumen (105:157, sin la brasa: es el paso 4)
+//  El resumen (105:157)
 // ---------------------------------------------------------------------------
 
 function SummaryView({
@@ -587,6 +587,7 @@ function SummaryView({
       <p className="font-display text-[22px] leading-[normal] font-bold text-parchment">
         {soulsLabel(summary.souls, false)}
       </p>
+      {summary.ember && <EmberResult ember={summary.ember} />}
       <button
         type="button"
         onClick={onContinue}
@@ -595,6 +596,44 @@ function SummaryView({
         Continuar
       </button>
     </>
+  );
+}
+
+// Lo que pasó con la brasa al acertar todas las del banco. Sin summary.ember
+// (alguna fallada, esquivada, saltada o genérica) no se pinta nada.
+//   earned → la píldora "Has ganado una brasa · N / 2" y para qué sirve;
+//   full → la píldora "Tus brasas están completas · 2 / 2";
+//   easy-boss → solo una línea pequeña: los fáciles no dan brasa.
+// Son textos normales (el lector los lee al recorrer el diálogo); el punto
+// es decorativo.
+function EmberResult({ ember }: { ember: NonNullable<Summary["ember"]> }) {
+  if (ember.outcome === "easy-boss") {
+    return (
+      <p className="text-xs leading-normal text-smoke">
+        Contra jefes medios y difíciles, esto te daría una brasa.
+      </p>
+    );
+  }
+  const earned = ember.outcome === "earned";
+  return (
+    <div className="flex max-w-full flex-col items-center gap-2">
+      {/* max-w-full y flex-wrap: a 320 px el texto baja de línea dentro de
+          la píldora en vez de desbordar. */}
+      <p className="flex max-w-full items-center gap-2 rounded-full border border-ember/50 bg-ember-deep px-3.5 py-1.5 text-[13px] leading-[normal] font-semibold text-ember">
+        <span aria-hidden className="size-2 shrink-0 rounded-full bg-ember shadow-[0_0_6px_var(--color-ember)]" />
+        <span className="flex flex-wrap justify-center gap-x-1">
+          <span>{earned ? "Has ganado una brasa" : "Tus brasas están completas"}</span>{" "}
+          <span className="whitespace-nowrap">
+            · {ember.embers} / {EMBER.max}
+          </span>
+        </span>
+      </p>
+      {earned && (
+        <p className="text-xs leading-normal text-ash">
+          Si un día no estudias, una brasa se consume y tu llama sigue encendida.
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -13,7 +13,7 @@ export type CharacterUser = {
 
 type CharacterCardProps = {
   user: CharacterUser;
-  // Estado de la llama, ya calculado con flameState() (lo hace AppShell una
+  // Estado de la llama (con las brasas), ya calculado con flameState() (lo hace AppShell una
   // sola vez para los dos bloques, el de escritorio y el de móvil).
   flame: FlameState;
   className?: string;
@@ -59,18 +59,21 @@ export function CharacterCard({ user, flame, className }: CharacterCardProps) {
           )}
         </div>
         {/* min-w-0: sin esto, truncate no puede cortar dentro de un flex.
-            flex-1: la columna llega hasta el borde y la llama queda a la
+            flex-1: la columna llega hasta la de la llama, que queda a la
             derecha. */}
         <div className="flex min-w-0 flex-1 flex-col gap-[3px] leading-[normal]">
-          <div className="flex items-center justify-between gap-2">
-            <p title={user.name} className="truncate text-[15px] font-semibold text-parchment">
-              {user.name}
-            </p>
-            <FlameBadge flame={flame} />
-          </div>
+          <p title={user.name} className="truncate text-[15px] font-semibold text-parchment">
+            {user.name}
+          </p>
           <p className="font-display text-xs font-bold tracking-[1.5px] text-gold uppercase">
             Nivel {level}
           </p>
+        </div>
+        {/* "llama y brasas" (104:2, nodo 105:221): la llama arriba y, debajo,
+            las brasas, alineadas a la derecha. */}
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <FlameBadge flame={flame} />
+          {flame.embers > 0 && <EmberChip embers={flame.embers} />}
         </div>
       </div>
 
@@ -104,34 +107,76 @@ export function CharacterCard({ user, flame, className }: CharacterCardProps) {
 
 // Colores de cada estado: icono y número. En peligro, la llama sigue siendo
 // de ascua pero tenue (el 45 % del Figma) y el número pasa a gris claro.
+// Protegida se distingue de un vistazo: la misma llama tenue, pero el número
+// en ascua y un borde de ascua alrededor (el color de la brasa que la cubre).
 const FLAME_COLORS: Record<FlameState["status"], { icon: string; number: string }> = {
   lit: { icon: "text-ember", number: "text-ember" },
   "at-risk": { icon: "text-ember/45", number: "text-ash" },
+  protected: { icon: "text-ember/45", number: "text-ember" },
   out: { icon: "text-smoke", number: "text-smoke" },
 };
 
-const FLAME_STATUS_TEXT: Record<FlameState["status"], string> = {
-  lit: "Encendida.",
-  "at-risk": "En peligro: golpea hoy para mantener la llama.",
-  out: "Apagada.",
-};
+// Lo que dice el lector de pantalla (y el title al pasar el ratón) en cada
+// estado. Las brasas cambian el "en peligro" y explican el "protegida".
+function flameStatusText(flame: FlameState): string {
+  switch (flame.status) {
+    case "lit":
+      return "Encendida.";
+    case "at-risk":
+      return flame.embers > 0
+        ? "En peligro: golpea hoy para mantenerla. Si no, una brasa la protegerá."
+        : "En peligro: golpea hoy para mantener la llama.";
+    case "protected":
+      return flame.embersToSpend === 1
+        ? "Protegida por una brasa: golpea hoy para mantenerla."
+        : "Protegida por dos brasas: golpea hoy para mantenerla.";
+    case "out":
+      return "Apagada.";
+  }
+}
 
 // La llama junto al nombre: icono y días seguidos. role="img" con aria-label
 // hace que el lector de pantalla lea una frase entera ("Racha: 5 días.
-// Encendida.") en vez del número suelto. En peligro lleva además title, que
-// el ratón muestra al pasar por encima.
+// Encendida.") en vez del número suelto. En peligro y protegida lleva además
+// title, que el ratón muestra al pasar por encima.
 function FlameBadge({ flame }: { flame: FlameState }) {
   const colors = FLAME_COLORS[flame.status];
   const daysText = flame.days === 1 ? "1 día" : `${formatNumber(flame.days)} días`;
+  const statusText = flameStatusText(flame);
   return (
     <p
       role="img"
-      aria-label={`Racha: ${daysText}. ${FLAME_STATUS_TEXT[flame.status]}`}
-      title={flame.status === "at-risk" ? "Golpea hoy para mantener la llama" : undefined}
-      className="flex shrink-0 items-center gap-1 text-[13px] leading-[normal] font-semibold"
+      aria-label={`Racha: ${daysText}. ${statusText}`}
+      title={flame.status === "at-risk" || flame.status === "protected" ? statusText : undefined}
+      className={cn(
+        "flex items-center gap-1 text-[13px] leading-[normal] font-semibold",
+        // -mr: el borde no empuja el número hacia dentro; sigue alineado
+        // con el de las brasas.
+        flame.status === "protected" && "-my-px -mr-1.5 rounded-full border border-ember/60 px-1.5",
+      )}
     >
       <Flame aria-hidden size={16} className={colors.icon} />
       <span className={colors.number}>{formatNumber(flame.days)}</span>
+    </p>
+  );
+}
+
+// Las brasas, debajo de la llama (105:218): un punto de ascua y cuántas hay.
+// Solo se pinta con 1 o más. Como la llama, role="img" con una frase entera.
+function EmberChip({ embers }: { embers: number }) {
+  const label =
+    embers === 1
+      ? "1 brasa: protege tu llama si un día no estudias."
+      : `${embers} brasas: protegen tu llama hasta ${embers} días sin estudiar.`;
+  return (
+    <p
+      role="img"
+      aria-label={label}
+      title={label}
+      className="flex items-center gap-[5px] text-[13px] leading-[normal] font-semibold text-parchment"
+    >
+      <span aria-hidden className="size-2 rounded-full bg-ember shadow-[0_0_6px_var(--color-ember)]" />
+      <span>{formatNumber(embers)}</span>
     </p>
   );
 }

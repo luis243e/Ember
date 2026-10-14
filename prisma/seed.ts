@@ -1,7 +1,7 @@
 // Datos de prueba para la base de DESARROLLO (Postgres de Docker).
 // Ejecutar:  npm run db:seed
 // Crea (o vuelve a crear) la cuenta prueba@ember.test con materias, preguntas,
-// jefes en varios estados, vigilias, almas y llama. Se niega a correr contra cualquier
+// jefes en varios estados, vigilias, almas, llama y una brasa. Se niega a correr contra cualquier
 // base que no esté en este equipo.
 import { randomUUID } from "node:crypto";
 import { PrismaClient, type Difficulty, type QuestionType, type TaskStatus } from "@prisma/client";
@@ -180,6 +180,9 @@ async function main(): Promise<void> {
         level: levelForSouls(SOULS).level,
         flame: 4,
         lastStrikeDay: dayOffset(-1),
+        // Una brasa: se ve el chip bajo la llama, y la llama en peligro dice
+        // que, si hoy no golpea, la brasa la protegerá.
+        embers: 1,
       },
     });
 
@@ -248,7 +251,7 @@ async function main(): Promise<void> {
   });
 
   console.log(`Seed listo: ${EMAIL} / ${PASSWORD}`);
-  console.log(`  ${TASKS.length} jefes en 2 materias, ${SOULS} almas, llama 4 (en peligro).`);
+  console.log(`  ${TASKS.length} jefes en 2 materias, ${SOULS} almas, llama 4 (en peligro) y 1 brasa.`);
   console.log(`  ${CALCULO_QUESTIONS.length} preguntas en Cálculo; Historia sin preguntas.`);
 }
 

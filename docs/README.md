@@ -3,7 +3,7 @@
 Ember es una app de estudio con estética de videojuego: las tareas son jefes
 (`Task`, con vida y estado `ALIVE` / `DEFEATED` / `FAILED`), las sesiones de
 estudio les quitan vida y el personaje del usuario tiene nivel, almas
-(`souls`) y llama (`flame`).
+(`souls`), llama (`flame`) y brasas (`embers`).
 
 ## Estado actual
 
@@ -12,9 +12,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
 - **Base de datos:** 12 tablas (ver [Modelo de datos](#modelo-de-datos)),
-  creadas con 14 migraciones (la 14.ª, `20261012183227_repaso`, solo en la
-  base local; la 12.ª y la 13.ª ya están en `main`, commits `6026efc` y
-  `53e2712`).
+  creadas con 15 migraciones (la 14.ª, `20261012183227_repaso`, y la 15.ª,
+  `20261014194417_brasa`, solo en la base local; la 12.ª y la 13.ª ya están
+  en `main`, commits `6026efc` y `53e2712`).
   RLS activado en todas, y en producción también en `_prisma_migrations` (a
   mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
@@ -27,8 +27,11 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261012183227_repaso` (12 oct, sin commit;
-  solo en la base local): añade `Question.reviewLevel` (por defecto 0, con un
+- **Migraciones:** la última es `20261014194417_brasa` (14 oct, sin commit;
+  solo en la base local): añade `User.embers` (por defecto 0, con un `CHECK`
+  a mano de 0 a 2) y `Counterattack.bossDifficulty` (opcional; `null` en los
+  contraataques de antes). Solo añade cosas. La anterior,
+  `20261012183227_repaso` (12 oct, sin commit; solo en la base local): añade `Question.reviewLevel` (por defecto 0, con un
   `CHECK` a mano de 0 a 5) y `Question.reviewDueAt` (opcional), un índice
   `(subjectId, reviewDueAt)` y **rellena** las preguntas que ya existían a
   partir de su último intento. Solo añade cosas. La anterior,
@@ -69,6 +72,22 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis; **antes del push hay que crear `GMAIL_USER` y
   `GMAIL_APP_PASSWORD` en Vercel**. Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
+- **Fase 2 completa (14 oct).** Banco de preguntas, contraataque, escriba,
+  preguntas que vuelven y brasa.
+- **Fase 2 · paso 5: la brasa (14 oct, sin commit):** un comodín que salva la
+  llama. Se gana al terminar un contraataque perfecto (todas del banco, sin
+  genéricas, y todas acertadas) contra un jefe medio o difícil; máximo 2
+  (`EMBER` y `emberForCounterattack()` en `lib/game.ts`). Se gasta sola al
+  golpear: una por cada día sin golpear; si alcanzan, la llama sigue y suma
+  1, y si no, se apaga y no se gasta ninguna (`flameAfterStrike()`). Nuevo
+  estado de la llama, **protegida** (borde de ascua), y su aviso «Una brasa
+  protege tu llama…». En la tarjeta del personaje, el chip «● N» bajo la
+  llama (Figma 105:221); en el resumen del contraataque, la píldora «Has
+  ganado una brasa · N / 2» (Figma 105:157); en la batalla, «Una brasa ha
+  mantenido tu llama encendida. Te queda N.». La pantalla y el golpe usan
+  el mismo cálculo (`flameOutlook()`). Probado en local (script
+  `probar-brasa` y Chrome, también a 320 px). Detalles en
+  [2026-10-14-la-brasa.md](sesiones/2026-10-14-la-brasa.md).
 - **Fase 2 · paso 4: las preguntas que vuelven (12 oct, sin commit):**
   repetición espaciada tipo Leitner. Cada pregunta del banco tiene un nivel
   de 0 a 5 y una fecha en la que vuelve (`REVIEW` y `nextReview()` en
@@ -167,7 +186,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   con 0). Se ve junto al nombre en el bloque del personaje, y las páginas con
   `AppShell` muestran "La llama se ha extinguido…" si se apagó habiendo
   racha. Probado en local; aún no en Vercel. Detalles en
-  [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md).
+  [2026-10-08-la-llama.md](sesiones/2026-10-08-la-llama.md). Desde el 14 oct
+  las brasas la protegen (ver el paso 5 de la Fase 2).
 - **Jefes vencidos y misión de redención (8 oct, en `origin/main` desde el
   commit `df0d0c4`):** un jefe vivo pasa a
   `FAILED` cuando termina su día de entrega en hora de Colombia (el día de
@@ -215,14 +235,14 @@ migraciones, y el schema lo avisa con un comentario.
 
 | Tabla | Qué guarda | Relaciones |
 |---|---|---|
-| `User` | Usuario y su personaje: nivel, almas, llama, límite de correos | Tiene materias, vigilias, misiones, intentos, contraataques, invocaciones del escriba, sesiones y cuentas |
+| `User` | Usuario y su personaje: nivel, almas, llama, brasas (`embers`, 0–2, con un `CHECK` a mano), límite de correos | Tiene materias, vigilias, misiones, intentos, contraataques, invocaciones del escriba, sesiones y cuentas |
 | `Subject` | Materia ("Cálculo") | De un `User`. Tiene jefes (`Task`) y preguntas (`Question`) |
 | `Task` | Jefe: vida, dificultad, fecha de entrega, estado, `bossKey` | De una `Subject` (no tiene `userId`: se filtra por la materia) |
 | `StudySession` | Vigilia de 25 min y sus almas | De una `Task` y de un `User`. Una sola abierta por usuario (índice parcial) |
 | `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo | De un `User` y una `Task`. Una sola `ACTIVE` por usuario (índice parcial) |
 | `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation`, `sealed` (del escriba y aún sin contestar), `reviewLevel` (0–5) y `reviewDueAt` (cuándo vuelve; `null` = nueva) | De una `Subject` (`Cascade`). Cinco `CHECK` a mano (el cuarto: solo las `AGENT` pueden estar selladas; el quinto: `reviewLevel` entre 0 y 5) |
 | `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque: `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta` (las aplicadas). La escribe `responderPreguntaDe` (`chosenIndex` en el orden ORIGINAL de la pregunta); las genéricas no | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
-| `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, `order` = permutación de sus opciones y, solo si es de repaso, `review: true`), `answered`, `correctCount`, `soulsDelta`, `finishedAt` | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
+| `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, `order` = permutación de sus opciones y, solo si es de repaso, `review: true`), `answered`, `correctCount`, `soulsDelta`, `finishedAt`, `bossDifficulty` (la del jefe al crearlo; decide la brasa; `null` = de antes de la brasa) | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
 | `AgentInvocation` | Cada invocación del escriba: `status` (`PENDING` / `OK` / `FAILED`), `inputKind` (`TEXT` / `PDF`), `questionsCreated`, `createdAt`, `finishedAt`. Para el límite diario. **No guarda los apuntes, ni el PDF, ni el nombre del archivo** | De un `User` y una `Subject` (`Cascade`) |
 | `Session`, `Account`, `Verification` | Tablas de Better Auth (sesiones, contraseña, enlaces de verificación) | `Session` y `Account` de un `User` |
 
@@ -261,15 +281,17 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
 5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
    equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
    descarga la imagen. `docker compose ps` debe decir `healthy`.
-6. `npx prisma migrate deploy` crea las tablas aplicando las 13 migraciones.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 15 migraciones.
 7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
    `prueba1234`** (de desarrollo, no protege nada real) con 2 materias (5
    preguntas en Cálculo; Historia sin preguntas), 5 jefes en varios estados,
-   almas y llama, y con el correo ya verificado. Se puede repetir: rehace la
+   almas, llama y una brasa, y con el correo ya verificado. Se puede repetir: rehace la
    cuenta. Para comprobar el banco de preguntas:
    `node --env-file=.env --import ./scripts/alias-hooks.mjs scripts/probar-preguntas.ts`
    (tiene que terminar en "Todo bien."); el contraataque, igual con
-   `scripts/probar-contraataque.ts`; el escriba, sin gastar cuota, con
+   `scripts/probar-contraataque.ts`; la brasa, con `scripts/probar-brasa.ts`
+   (con `npm run dev` encendido: comprueba también que el navegador no puede
+   cambiar `embers`); el escriba, sin gastar cuota, con
    `EMBER_FAKE_AGENT=1` delante y `scripts/probar-escriba.ts` (con
    `npm run dev` encendido, `--payload` comprueba también el HTML). Las
    llamadas reales a Gemini (gastan cuota): `scripts/probar-gemini.ts`.
@@ -404,7 +426,8 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   +15 / −5; verdadero o falso +10 / −10; genéricas +5 siempre; esquivar 0. **Si
   se cambian, contestar al azar tiene que seguir dando 0 de media** (¼·acierto
   + ¾·fallo y ½·acierto + ½·fallo): `scripts/probar-contraataque.ts` lo
-  comprueba. Contestar no toca la llama ni la misión de redención.
+  comprueba. Contestar no toca la llama ni la misión de redención (sí puede
+  dar una brasa, al contestar la última).
 - **Las opciones de opción múltiple se barajan al crear el contraataque** con
   `randomInt` de `node:crypto` y la permutación se guarda en `items`. En
   `QuestionAttempt.chosenIndex` va siempre el índice ORIGINAL de la pregunta.
@@ -568,6 +591,13 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   del usuario que las almas. Las páginas calculan el estado con
   `flameState()` y nunca escriben en la base al cargar. `flame` conserva la
   racha antigua aunque esté apagada: así se sabe cuándo enseñar el aviso.
+- **Las brasas siguen la misma evaluación perezosa.** Se gastan solo al
+  golpear (`flameAfterStrike`, en la misma escritura del usuario) y la
+  pantalla anuncia lo que pasará con `flameState`. Las dos usan
+  `flameOutlook()`: **no contar días perdidos en ningún otro sitio**, o la
+  pantalla y el golpe podrían no coincidir (`scripts/probar-brasa.ts` lo
+  comprueba en 72 casos). Ganarlas lo decide solo `emberForCounterattack()`,
+  con el usuario bloqueado y en la transacción que termina el contraataque.
 - **Las fechas de entrega son días de calendario.** Se guardan a las 00:00
   UTC, se muestran con `timeZone: "UTC"` (`formatDueDate`) y "hoy" se calcula
   en `America/Bogota` (`todayInAppTimeZone`), todo en `lib/dates.ts`. Así el
@@ -684,14 +714,19 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 
 ## Pendientes
 
-- [ ] **Fase 2 · paso 5, la brasa.** La brasa se gana acertando todas las
-  preguntas del banco de un contraataque, SOLO contra jefes de dificultad
-  media o difícil. Las genéricas no cuentan. Máximo 2.
 - [ ] Borrar `@@index([subjectId])` de `Question` en una migración futura: el
   índice `(subjectId, reviewDueAt)` del paso 4 lo cubre. No se borró porque
   la migración del repaso tenía que ser solo aditiva.
 - [ ] Desplegar `20261012183227_repaso` (y probar el repaso en producción):
   allí el relleno usará los intentos de producción.
+- [ ] Desplegar `20261014194417_brasa` (solo aditiva) y probar la brasa en
+  producción: ganarla, el chip, la llama protegida y el gasto al golpear.
+- [ ] Brasa: probar con lector de pantalla real y en Safari y Firefox; en el
+  navegador faltan la píldora «Tus brasas están completas» y la línea del
+  jefe fácil (sí probadas en el script).
+- [ ] Si se quiere el aviso «una brasa salvó tu llama» fuera de la batalla
+  (en AppShell, el resto del día), hace falta una columna (por ejemplo
+  `User.emberSavedDay`). Hoy solo sale justo después del golpe.
 - [ ] **Secuestro previo de cuenta.** Alguien puede registrar un correo
   ajeno con su contraseña y, como el reenvío no la pide, hacer que al dueño
   le lleguen enlaces de verificación. Si el dueño abre uno, entra
@@ -724,10 +759,6 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   pantalla y en Safari y Firefox. Confirmar que llegaron a Gmail el aviso
   "Ya tienes una cuenta" (`+prueba2`) y el reenvío al entrar sin verificar
   (`+prueba1`).
-- [ ] **Fase 2 · paso 4 (la brasa): la brasa NO puede ganarse con preguntas
-  genéricas; si no, una materia sin preguntas daría brasa gratis.** (Aviso
-  también en `lib/questions/counterattack.ts`.) La píldora del resumen
-  (Figma 105:157) todavía no está.
 - [ ] Contraataque: probarlo en Vercel (latencia de contestar contra
   Supabase), con lector de pantalla, con movimiento reducido real (la espera
   de 1,2 s no se vio animada: la pestaña de Chrome estaba oculta) y en Safari
@@ -819,6 +850,13 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base de producción se recrea, volver a activar a mano el RLS de
   `_prisma_migrations` (en la local no hace falta: no tiene API pública).
+- [x] ~~Fase 2 · paso 5: la brasa~~ (14 oct, sin commit): se gana con un
+  contraataque perfecto del banco contra un jefe medio o difícil (máximo 2),
+  se gasta sola al golpear si hubo días perdidos, llama protegida, chip,
+  píldora del resumen y avisos. **Fase 2 completa.**
+- [x] ~~La brasa no puede ganarse con preguntas genéricas~~ (14 oct):
+  `allFromBank` en `emberForCounterattack()`, probado también mezclando una
+  del banco con una genérica. La píldora del resumen (Figma 105:157) ya está.
 - [x] ~~Fase 2 · paso 4: las preguntas que vuelven~~ (12 oct, sin commit):
   nivel y fecha de repaso por pregunta, migración con relleno, el jefe elige
   por repaso con una nueva reservada, «Repaso» en la batalla y estados en el
@@ -911,4 +949,5 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-10 | Fase 2 · paso 1: banco de preguntas (`Question`, `QuestionAttempt`, enums, `String[]`, `CHECK` a mano), `/materias/[id]`, proveedor único y preguntas genéricas | [2026-10-10-banco-de-preguntas.md](sesiones/2026-10-10-banco-de-preguntas.md) |
 | 2026-10-10 | Fase 2 · paso 2: el contraataque (`Counterattack` con `items` en `jsonb`, permutación con `node:crypto`, valor esperado 0, índice único por vigilia, orden de bloqueos ampliado, `lib/battle.ts`, panel modal accesible) | [2026-10-10-contraataque.md](sesiones/2026-10-10-contraataque.md) |
 | 2026-10-11 | Fase 2 · paso 3: el escriba (Gemini por `fetch`, salida estructurada, inyección de prompt, PDF en base64 con páginas contadas sin dependencias y topes contra bombas, preguntas selladas con `Question.sealed`, límite diario con reserva `PENDING`, «Retírala», contraataque según la dificultad) | [2026-10-11-el-escriba.md](sesiones/2026-10-11-el-escriba.md) |
+| 2026-10-14 | Fase 2 · paso 5: la brasa (cierra la Fase 2): `User.embers` con `CHECK`, `Counterattack.bossDifficulty`, evaluación perezosa compartida con `flameOutlook()`, llama protegida, chip, píldora y avisos, `input: false` probado contra el servidor | [2026-10-14-la-brasa.md](sesiones/2026-10-14-la-brasa.md) |
 | 2026-10-12 | Fase 2 · paso 4: las preguntas que vuelven (repetición espaciada tipo Leitner, días de calendario de Bogotá, migración con relleno en SQL comprobado contra `nextReview`, reserva para nuevas, `FOR UPDATE` del nivel, «Repaso» y estados del banco) | [2026-10-12-preguntas-que-vuelven.md](sesiones/2026-10-12-preguntas-que-vuelven.md) |

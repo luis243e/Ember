@@ -3,12 +3,19 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 type NoticeProps = {
-  // muted = llama gris (algo se perdió); gold = llama dorada (algo se ganó).
-  tone?: "muted" | "gold";
+  // muted = llama gris (algo se perdió); gold = llama dorada (algo se ganó);
+  // ember = llama de ascua (las brasas protegen o salvaron la llama).
+  tone?: "muted" | "gold" | "ember";
   // La primera frase, en negrita.
   title: string;
   // El resto del texto.
   children: ReactNode;
+};
+
+const TONE_ICON: Record<NonNullable<NoticeProps["tone"]>, string> = {
+  muted: "text-smoke",
+  gold: "text-gold-bright",
+  ember: "text-ember",
 };
 
 // Aviso al entrar (Figma "LA LLAMA Y LA REDENCIÓN · avisos al entrar"): llama
@@ -25,7 +32,7 @@ export function Notice({ tone = "muted", title, children }: NoticeProps) {
       <Flame
         aria-hidden
         size={18}
-        className={cn("-mt-px shrink-0", tone === "gold" ? "text-gold-bright" : "text-smoke")}
+        className={cn("-mt-px shrink-0", TONE_ICON[tone])}
       />
       {/* wrap-anywhere: el nombre de un jefe (hasta 80 caracteres, quizá sin
           espacios) se parte en vez de desbordar. */}

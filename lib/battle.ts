@@ -25,6 +25,7 @@ import {
   applySoulsDelta,
   COUNTERATTACK,
   counterattackSouls,
+  emberForCounterattack,
   flameAfterStrike,
   HP_PER_BLOCK,
   levelForSouls,
@@ -33,10 +34,12 @@ import {
   rollVictorySouls,
   vigilDurationMs,
   type AnswerOutcome,
+  type EmberOutcome,
 } from "@/lib/game";
 import { preguntasParaContraataque } from "@/lib/questions/provider";
 import {
   buildItems,
+  isGenericItem,
   parseItems,
   resolveItem,
   toOriginalIndex,
@@ -48,8 +51,9 @@ import { formatCountdown } from "@/app/mazmorra/batalla/[id]/countdown";
 // el mensaje que verá el usuario. Los campos opcionales solo los da
 // asestarGolpe: strikeSouls son las almas del golpe, victorySouls las de la
 // victoria (solo si el jefe cayó), recoveredSouls las que vuelven al cumplir
-// la misión de redención (solo si este golpe la cumplió) y newLevel el nivel
-// alcanzado (solo si se subió).
+// la misión de redención (solo si este golpe la cumplió), newLevel el nivel
+// alcanzado (solo si se subió) y embersSpent / embersLeft las brasas que
+// salvaron la llama y las que quedan (solo si alguna se gastó).
 export type ResultadoBatalla =
   | {
       ok: true;
@@ -59,6 +63,8 @@ export type ResultadoBatalla =
       victorySouls?: number;
       recoveredSouls?: number;
       newLevel?: number;
+      embersSpent?: number;
+      embersLeft?: number;
     }
   | { ok: false; error: string };
 
@@ -81,16 +87,16 @@ async function bloquearTarea(tx: Prisma.TransactionClient, taskId: string) {
 }
 
 // Lo mismo con la fila del usuario: la bloquea hasta el final de la
-// transacción y devuelve lo que hace falta para calcular almas, nivel y
-// llama. Va después de la tarea, la vigilia y el contraataque, y antes de la
-// misión (tarea → vigilia → contraataque → usuario → misión). Con la fila
-// bloqueada nadie más puede cambiar esos valores, así que se calculan en el
-// código y se escriben de una vez.
+// transacción y devuelve lo que hace falta para calcular almas, nivel,
+// llama y brasas. Va después de la tarea, la vigilia y el contraataque, y
+// antes de la misión (tarea → vigilia → contraataque → usuario → misión). Con
+// la fila bloqueada nadie más puede cambiar esos valores, así que se calculan
+// en el código y se escriben de una vez.
 async function bloquearUsuario(tx: Prisma.TransactionClient, userId: string) {
   const rows = await tx.$queryRaw<
-    { souls: number; level: number; flame: number; lastStrikeDay: Date | null }[]
+    { souls: number; level: number; flame: number; lastStrikeDay: Date | null; embers: number }[]
   >`
-    SELECT "souls", "level", "flame", "lastStrikeDay" FROM "User"
+    SELECT "souls", "level", "flame", "lastStrikeDay", "embers" FROM "User"
     WHERE "id" = ${userId} FOR UPDATE`;
   return rows[0];
 }
@@ -123,9 +129,11 @@ async function bloquearContraataque(
       correctCount: number;
       soulsDelta: number;
       finishedAt: Date | null;
+      bossDifficulty: Difficulty | null;
     }[]
   >`
-    SELECT "studySessionId", "items", "answered", "correctCount", "soulsDelta", "finishedAt"
+    SELECT "studySessionId", "items", "answered", "correctCount", "soulsDelta", "finishedAt",
+      "bossDifficulty"
     FROM "Counterattack"
     WHERE "id" = ${counterattackId} AND "userId" = ${userId} FOR UPDATE`;
   return rows[0];
@@ -255,9 +263,11 @@ export async function asestarGolpeDe(
     // calcula todo en el código y el usuario se escribe UNA vez. Almas: el
     // total nuevo, con las de la misión si este golpe la cumple. Nivel: se
     // deduce del total con levelForSouls y se escribe solo si cambia (User.level
-    // lo escriben SOLO este golpe y responderPreguntaDe, los dos así). Llama:
-    // con el día de hoy en hora de Colombia, el mismo "hoy" que las fechas de
-    // entrega.
+    // lo escriben SOLO este golpe y responderPreguntaDe, los dos así). Llama
+    // y brasas: con el día de hoy en hora de Colombia, el mismo "hoy" que las
+    // fechas de entrega. Si hubo días sin golpear y las brasas los cubren, se
+    // gastan aquí, en la misma escritura (flameAfterStrike decide; la
+    // pantalla usa la misma regla con flameState).
     const owner = await bloquearUsuario(tx, userId);
     const mission = await bloquearMision(tx, userId);
     // Cómo avanza la misión lo decide SOLO advanceRedemption (lib/game.ts).
@@ -277,7 +287,12 @@ export async function asestarGolpeDe(
     const gained = strikeSouls + (victorySouls ?? 0) + recoveredSouls;
     const souls = owner.souls + gained;
     const level = levelForSouls(souls).level;
-    const flame = flameAfterStrike(owner.flame, owner.lastStrikeDay, todayInAppTimeZone(now));
+    const flame = flameAfterStrike(
+      owner.flame,
+      owner.lastStrikeDay,
+      todayInAppTimeZone(now),
+      owner.embers,
+    );
     await tx.user.update({
       where: { id: userId },
       data: {
@@ -285,6 +300,7 @@ export async function asestarGolpeDe(
         ...(level !== owner.level && { level }),
         flame: flame.flame,
         lastStrikeDay: flame.lastStrikeDay,
+        ...(flame.embersSpent > 0 && { embers: flame.embers }),
       },
     });
     // ¿Se subió de nivel con ESTE golpe? Se compara con el nivel que daban
@@ -300,6 +316,7 @@ export async function asestarGolpeDe(
         victorySouls,
         recoveredSouls: recoveredSouls > 0 ? recoveredSouls : undefined,
         newLevel: leveledUp ? level : undefined,
+        ...(flame.embersSpent > 0 && { embersSpent: flame.embersSpent, embersLeft: flame.embers }),
       },
       // El contraataque solo si el jefe sigue vivo: si cayó, no contraataca.
       studySessionId: defeated ? undefined : closed[0].id,
@@ -321,7 +338,9 @@ export async function asestarGolpeDe(
 }
 
 // Crea el contraataque de una vigilia recién golpeada, con tantas preguntas
-// como diga la dificultad del jefe (fácil 1, media 2, difícil 3). Nunca lanza:
+// como diga la dificultad del jefe (fácil 1, media 2, difícil 3). Guarda esa
+// dificultad: al terminar decide si da brasa sin tener que volver a la tarea.
+// Nunca lanza:
 // registra el error y sigue. El índice único de studySessionId impide un
 // segundo contraataque para la misma vigilia (P2002), aunque esto se llamara
 // dos veces.
@@ -339,7 +358,7 @@ async function crearContraataque(
     );
     if (questions.length === 0) return;
     await prisma.counterattack.create({
-      data: { studySessionId, userId, items: buildItems(questions) },
+      data: { studySessionId, userId, items: buildItems(questions), bossDifficulty: difficulty },
     });
   } catch (error) {
     console.error("No se pudo crear el contraataque; el golpe cuenta igual.", error);
@@ -355,6 +374,11 @@ async function crearContraataque(
 // salta sin almas.
 export type RespuestaOutcome = AnswerOutcome | "answered" | "skipped";
 
+// Lo que el resumen cuenta de la brasa: earned (+1), full (ya tenía 2) o
+// easy-boss (acertó todo el banco, pero el jefe era fácil). embers = las que
+// tiene ahora.
+export type EmberSummary = { outcome: Exclude<EmberOutcome, "none">; embers: number };
+
 export type ResultadoRespuesta =
   | {
       ok: true;
@@ -367,8 +391,15 @@ export type ResultadoRespuesta =
       // La respuesta restaba, pero el nivel lo impidió (en parte o del todo).
       protectedByLevel: boolean;
       newLevel?: number;
-      // Solo al contestar la última: aciertos sobre el total y almas totales.
-      summary?: { correct: number; total: number; souls: number };
+      // Solo al contestar la última: aciertos sobre el total, almas totales y,
+      // si acertó todas las del banco, qué pasó con la brasa (ver
+      // emberForCounterattack en lib/game.ts) y cuántas tiene ahora.
+      summary?: {
+        correct: number;
+        total: number;
+        souls: number;
+        ember?: EmberSummary;
+      };
     }
   | { ok: false; error: string };
 
@@ -439,23 +470,53 @@ export async function responderPreguntaDe(
         nominal = counterattackSouls(question.kind, outcome === "answered" ? "correct" : outcome);
       }
 
-      // 3. El usuario (después del contraataque), solo si cambian las almas.
-      // Lo que se resta nunca baja de nivel (applySoulsDelta), y el nivel se
-      // deduce de las almas con levelForSouls, igual que en el golpe.
+      // Aciertos con esta respuesta. Una genérica contestada cuenta como
+      // acierto en el resumen, pero no para la brasa (ver más abajo).
+      const counted = outcome === "correct" || outcome === "answered";
+      const correctCount = counter.correctCount + (counted ? 1 : 0);
+
+      // 3. El usuario (después del contraataque), solo si cambian las almas o
+      // es la última pregunta (puede dar brasa). Lo que se resta nunca baja
+      // de nivel (applySoulsDelta), y el nivel se deduce de las almas con
+      // levelForSouls, igual que en el golpe.
+      // La brasa la decide SOLO emberForCounterattack (lib/game.ts), con el
+      // usuario ya bloqueado: dos contraataques que terminan a la vez no
+      // pueden pasar los dos del tope. Como se da en la misma transacción que
+      // pone finishedAt, con el contraataque bloqueado, un contraataque no
+      // puede dar dos brasas. Todas del banco = ningún item genérico;
+      // acertadas todas = tantos aciertos como preguntas (esquivar, fallar o
+      // saltar una no suman).
       let applied = 0;
       let newLevel: number | undefined;
-      if (nominal !== 0) {
+      let ember: EmberSummary | undefined;
+      if (nominal !== 0 || isLast) {
         const owner = await bloquearUsuario(tx, userId);
         const next = applySoulsDelta(owner.souls, nominal);
         applied = next.applied;
         const level = levelForSouls(next.souls).level;
-        if (applied !== 0) {
+        const reward = isLast
+          ? emberForCounterattack(
+              {
+                difficulty: counter.bossDifficulty,
+                allFromBank: !items.some(isGenericItem),
+                allCorrect: correctCount === items.length,
+              },
+              owner.embers,
+            )
+          : null;
+        const earned = reward?.outcome === "earned";
+        if (applied !== 0 || earned) {
           await tx.user.update({
             where: { id: userId },
-            data: { souls: next.souls, ...(level !== owner.level && { level }) },
+            data: {
+              souls: next.souls,
+              ...(level !== owner.level && { level }),
+              ...(earned && { embers: reward.embers }),
+            },
           });
         }
         if (level > levelForSouls(owner.souls).level) newLevel = level;
+        if (reward && reward.outcome !== "none") ember = { outcome: reward.outcome, embers: reward.embers };
       }
 
       // 4. El repaso y el intento, solo con preguntas del banco (las
@@ -495,8 +556,6 @@ export async function responderPreguntaDe(
       }
 
       // 5. El contraataque avanza una pregunta, con todo en una escritura.
-      const counted = outcome === "correct" || outcome === "answered";
-      const correctCount = counter.correctCount + (counted ? 1 : 0);
       const soulsDelta = counter.soulsDelta + applied;
       await tx.counterattack.update({
         where: { id: counterattackId },
@@ -519,7 +578,9 @@ export async function responderPreguntaDe(
         soulsDelta: applied,
         protectedByLevel: nominal < 0 && applied > nominal,
         newLevel,
-        summary: isLast ? { correct: correctCount, total: items.length, souls: soulsDelta } : undefined,
+        summary: isLast
+          ? { correct: correctCount, total: items.length, souls: soulsDelta, ...(ember && { ember }) }
+          : undefined,
       };
       // maxWait: lo que se espera a tener una conexión libre para empezar.
       // Con dos pestañas contestando a la vez, la segunda puede necesitar una

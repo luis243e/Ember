@@ -341,9 +341,68 @@ function daysSinceStrike(lastStrikeDay: Date | null, today: Date): number | null
   return Math.round((today.getTime() - lastStrikeDay.getTime()) / DAY_MS);
 }
 
-// lit = encendida (golpeó hoy), at-risk = en peligro (golpeó ayer, hoy
-// todavía no), out = apagada (antes de ayer o nunca).
-export type FlameStatus = "lit" | "at-risk" | "out";
+// ---------------------------------------------------------------------------
+//  La brasa (comodín de la llama)
+// ---------------------------------------------------------------------------
+
+// La brasa salva la llama cuando un día no se golpea. Se gana al terminar un
+// contraataque SOLO si se cumplen las tres cosas:
+//   - el jefe es de dificultad media o difícil;
+//   - todas las preguntas eran del banco (MANUAL o AGENT), sin genéricas: si
+//     no, una materia sin preguntas daría brasa gratis;
+//   - se acertaron todas (esquivar, fallar o una saltada porque se borró →
+//     no hay brasa).
+// Se tienen como mucho EMBER.max (User.embers, con un CHECK en la base).
+// Se gasta SOLA al golpear, una por cada día perdido (flameAfterStrike).
+export const EMBER = {
+  max: 2,
+  difficulties: ["MEDIUM", "HARD"],
+} as const satisfies { max: number; difficulties: readonly Difficulty[] };
+
+// earned = se ganó una; full = se ganaba, pero ya tenía el máximo;
+// easy-boss = acertó todo el banco, pero contra un jefe fácil (no da);
+// none = no se cumplían las condiciones.
+export type EmberOutcome = "earned" | "full" | "easy-boss" | "none";
+
+// LA regla de si un contraataque terminado da brasa. difficulty null = el
+// contraataque se creó antes de que se guardara la dificultad: no da brasa.
+// embers es lo que tiene el usuario ahora; devuelve lo que tendrá.
+export function emberForCounterattack(
+  counterattack: { difficulty: Difficulty | null; allFromBank: boolean; allCorrect: boolean },
+  embers: number,
+): { outcome: EmberOutcome; embers: number } {
+  const { difficulty, allFromBank, allCorrect } = counterattack;
+  if (!difficulty || !allFromBank || !allCorrect) return { outcome: "none", embers };
+  if (!(EMBER.difficulties as readonly Difficulty[]).includes(difficulty)) {
+    return { outcome: "easy-boss", embers };
+  }
+  if (embers >= EMBER.max) return { outcome: "full", embers };
+  return { outcome: "earned", embers: Math.max(embers, 0) + 1 };
+}
+
+// ---------------------------------------------------------------------------
+//  La llama: estado y golpe
+// ---------------------------------------------------------------------------
+
+// Cómo está la llama HOY, con las brasas. Es lo único que deciden juntas la
+// pantalla (flameState) y el golpe (flameAfterStrike): las dos llaman a esta
+// función, así que lo que la pantalla promete es justo lo que el golpe hace.
+//   days: días desde el último golpe (null = nunca).
+//   missed: días sin golpear entre el último golpe y hoy (sin contar hoy).
+//   saved: hay días perdidos y las brasas alcanzan para todos.
+// Con flame 0 no hay racha que salvar: no se gasta nada.
+function flameOutlook(flame: number, lastStrikeDay: Date | null, today: Date, embers: number) {
+  const days = daysSinceStrike(lastStrikeDay, today);
+  const missed = days === null ? 0 : Math.max(days - 1, 0);
+  const saved = missed > 0 && flame > 0 && embers >= missed;
+  return { days, missed, saved };
+}
+
+// lit = encendida (golpeó hoy); at-risk = en peligro (golpeó ayer, hoy
+// todavía no); protected = hubo días sin golpear, pero las brasas los cubren
+// (al golpear hoy se gastan y la llama sigue); out = apagada (días perdidos
+// sin brasas que alcancen, o nunca).
+export type FlameStatus = "lit" | "at-risk" | "protected" | "out";
 
 export type FlameState = {
   status: FlameStatus;
@@ -352,31 +411,53 @@ export type FlameState = {
   // Apagada, pero había racha: es cuando sale el aviso "La llama se ha
   // extinguido". Un usuario que nunca tuvo racha no lo ve.
   extinguished: boolean;
+  // Brasas que tiene ahora (las guardadas: el gasto se escribe al golpear).
+  embers: number;
+  // Brasas que se gastarán al golpear hoy. Solo > 0 en "protected", y es
+  // siempre lo mismo que dará flameAfterStrike(...).embersSpent.
+  embersToSpend: number;
 };
 
-// Estado de la llama al LEER una página. No escribe nada: la racha guardada
-// solo cambia al golpear, y el estado se deduce cada vez.
-export function flameState(flame: number, lastStrikeDay: Date | null, today: string): FlameState {
-  const days = daysSinceStrike(lastStrikeDay, parseToday(today));
+// Estado de la llama al LEER una página. No escribe nada: la racha y las
+// brasas guardadas solo cambian al golpear, y el estado se deduce cada vez
+// (evaluación perezosa).
+export function flameState(
+  flame: number,
+  lastStrikeDay: Date | null,
+  today: string,
+  embers: number,
+): FlameState {
+  const { days, missed, saved } = flameOutlook(flame, lastStrikeDay, parseToday(today), embers);
+  const base = { embers, embersToSpend: 0, extinguished: false };
   // Un día futuro no debería existir; si aparece, cuenta como hoy.
-  if (days !== null && days <= 0) return { status: "lit", days: flame, extinguished: false };
-  if (days === 1) return { status: "at-risk", days: flame, extinguished: false };
-  return { status: "out", days: 0, extinguished: flame > 0 };
+  if (days !== null && days <= 0) return { ...base, status: "lit", days: flame };
+  if (days === 1) return { ...base, status: "at-risk", days: flame };
+  if (saved) return { ...base, status: "protected", days: flame, embersToSpend: missed };
+  return { ...base, status: "out", days: 0, extinguished: flame > 0 };
 }
 
-// Racha y día que se guardan al asestar un golpe aceptado. Ya golpeó hoy: no
-// cambia (max por si la racha guardada fuera 0 por error). Golpeó ayer: suma
-// 1. Antes o nunca: vuelve a empezar en 1.
+// Racha, día y brasas que se guardan al asestar un golpe aceptado:
+//   - ya golpeó hoy: no cambia (max por si la racha guardada fuera 0);
+//   - golpeó ayer: suma 1;
+//   - hubo días perdidos y las brasas alcanzan: se gasta una por día perdido
+//     y suma 1 por el golpe de hoy (los días protegidos no suman);
+//   - si no alcanzan, o nunca golpeó: vuelve a empezar en 1 y las brasas NO
+//     se gastan (no se tiran en vano).
 export function flameAfterStrike(
   flame: number,
   lastStrikeDay: Date | null,
   today: string,
-): { flame: number; lastStrikeDay: Date } {
+  embers: number,
+): { flame: number; lastStrikeDay: Date; embers: number; embersSpent: number } {
   const todayDate = parseToday(today);
-  const days = daysSinceStrike(lastStrikeDay, todayDate);
-  if (days !== null && days <= 0) return { flame: Math.max(flame, 1), lastStrikeDay: todayDate };
-  if (days === 1) return { flame: flame + 1, lastStrikeDay: todayDate };
-  return { flame: 1, lastStrikeDay: todayDate };
+  const { days, missed, saved } = flameOutlook(flame, lastStrikeDay, todayDate, embers);
+  const keep = { lastStrikeDay: todayDate, embers, embersSpent: 0 };
+  if (days !== null && days <= 0) return { ...keep, flame: Math.max(flame, 1) };
+  if (days === 1) return { ...keep, flame: flame + 1 };
+  if (saved) {
+    return { flame: flame + 1, lastStrikeDay: todayDate, embers: embers - missed, embersSpent: missed };
+  }
+  return { ...keep, flame: 1 };
 }
 
 // ---------------------------------------------------------------------------

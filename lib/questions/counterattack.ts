@@ -4,11 +4,6 @@
 // SOLO del servidor: usa node:crypto y lee la base. El navegador nunca recibe
 // la referencia de la pregunta, su respuesta ni su explicación antes de
 // contestar; recibe solo publicQuestion().
-//
-// PENDIENTE (Fase 2, paso 5, la brasa): se gana acertando TODAS las
-// preguntas del banco de un contraataque, SOLO contra jefes de dificultad
-// media o difícil. Las genéricas no cuentan (si no, una materia sin
-// preguntas daría brasa gratis). Máximo 2.
 import { randomInt } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { CounterattackKind } from "@/lib/game";
@@ -26,6 +21,12 @@ export type CounterattackItem = { ref: string; order: number[]; review?: true };
 // Las genéricas no están en la base: su referencia es "generic:<clave>". Los
 // ids de Question (cuid) nunca llevan ":", así que no se confunden.
 const GENERIC_PREFIX = "generic:";
+
+// ¿Es genérica (no del banco)? La brasa solo se gana si NINGUNA lo es: si no,
+// una materia sin preguntas daría brasa gratis (lib/battle.ts).
+export function isGenericItem(item: CounterattackItem): boolean {
+  return item.ref.startsWith(GENERIC_PREFIX);
+}
 
 // Una pregunta del contraataque ya leída, con su respuesta: SOLO servidor.
 export type ResolvedQuestion = {
@@ -136,7 +137,7 @@ export async function resolveItem(
   db: Prisma.TransactionClient,
   item: CounterattackItem,
 ): Promise<ResolvedQuestion | null> {
-  if (item.ref.startsWith(GENERIC_PREFIX)) {
+  if (isGenericItem(item)) {
     const generic = genericByKey(item.ref.slice(GENERIC_PREFIX.length));
     if (!generic || generic.options.length !== item.order.length) return null;
     return {

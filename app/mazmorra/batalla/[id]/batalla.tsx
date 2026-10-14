@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Pause, Swords } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import type { TaskStatus } from "@prisma/client";
+import { EmberSavedNotice, emberSavedText } from "@/components/app/flame-notice";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink, buttonStyles } from "@/components/ui/button";
@@ -95,6 +96,10 @@ export function Batalla({
   // Almas devueltas por la misión de redención, si el último golpe la
   // cumplió. Como el nivel, solo vive aquí y en el momento.
   const [recoveredSouls, setRecoveredSouls] = useState<number | null>(null);
+  // Brasas que salvaron la llama con el último golpe (y las que quedan).
+  // Como el nivel, solo vive aquí y en el momento: el golpe ya escribió la
+  // llama, y la base no recuerda que se gastó una.
+  const [emberSaved, setEmberSaved] = useState<{ spent: number; left: number } | null>(null);
   const [hitting, setHitting] = useState(false);
   const [justDefeated, setJustDefeated] = useState(false);
   const paused = useSyncExternalStore(subscribePause, readPause, () => false);
@@ -177,6 +182,7 @@ export function Batalla({
     setError(null);
     setNewLevel(null);
     setRecoveredSouls(null);
+    setEmberSaved(null);
     startTransition(async () => {
       const result = await action(task.id);
       setConfirming(false);
@@ -202,11 +208,18 @@ export function Batalla({
         setHitting(true);
         setNewLevel(result.newLevel ?? null);
         setRecoveredSouls(result.recoveredSouls ?? null);
-        // Lo recuperado va antes que el nivel: es lo que lo hace subir.
+        const saved = result.embersSpent
+          ? { spent: result.embersSpent, left: result.embersLeft ?? 0 }
+          : null;
+        setEmberSaved(saved);
+        // Lo recuperado va antes que el nivel: es lo que lo hace subir. La
+        // brasa, al final.
         const levelText =
           (result.recoveredSouls
             ? ` Misión de redención cumplida: recuperas ${formatNumber(result.recoveredSouls)} almas.`
-            : "") + (result.newLevel ? ` Has alcanzado el nivel ${result.newLevel}.` : "");
+            : "") +
+          (result.newLevel ? ` Has alcanzado el nivel ${result.newLevel}.` : "") +
+          (saved ? ` ${emberSavedText(saved.spent, saved.left).join(" ")}` : "");
         if (result.defeated) {
           setJustDefeated(true);
           setAnnouncement(
@@ -501,6 +514,7 @@ export function Batalla({
                   {newLevel && <LevelUp level={newLevel} />}
                 </div>
               )}
+              {emberSaved && <EmberSavedNotice spent={emberSaved.spent} left={emberSaved.left} />}
               <ButtonLink href="/mazmorra" className="mt-4">
                 Volver a la mazmorra
               </ButtonLink>
@@ -517,6 +531,9 @@ export function Batalla({
                 aún no se ha repintado. */}
             {recoveredSouls !== null && !justDefeated && <Recovered souls={recoveredSouls} />}
             {newLevel && !justDefeated && <LevelUp level={newLevel} />}
+            {emberSaved && !justDefeated && (
+              <EmberSavedNotice spent={emberSaved.spent} left={emberSaved.left} />
+            )}
             {otherVigil && phase === "idle" && (
               <p className="text-center text-[13px] leading-normal text-ash">
                 Ya tienes una vigilia en curso contra «{otherVigil.taskName}». Termínala o

@@ -70,6 +70,9 @@ export const auth = betterAuth({
       level: { type: "number", required: true, defaultValue: 1, input: false },
       souls: { type: "number", required: true, defaultValue: 0, input: false },
       flame: { type: "number", required: true, defaultValue: 0, input: false },
+      // Brasas (0–2). Como las almas: solo las cambia el servidor al terminar
+      // un contraataque o al golpear (lib/battle.ts).
+      embers: { type: "number", required: true, defaultValue: 0, input: false },
       // Día del último golpe. required: false → puede ser null (nunca ha
       // golpeado), así que no lleva defaultValue.
       lastStrikeDay: { type: "date", required: false, input: false },

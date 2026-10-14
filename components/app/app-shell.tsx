@@ -3,7 +3,7 @@ import { ArrowLeft, BookOpen, LogOut, Swords, type LucideIcon } from "lucide-rea
 import type { ReactNode } from "react";
 import { cerrarSesion } from "@/app/mazmorra/actions";
 import { CharacterCard, type CharacterUser } from "@/components/app/character-card";
-import { ExtinguishedFlameNotice } from "@/components/app/flame-notice";
+import { ExtinguishedFlameNotice, ProtectedFlameNotice } from "@/components/app/flame-notice";
 import { RedemptionNotice } from "@/components/app/redemption-notice";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
@@ -27,8 +27,9 @@ type AppShellProps = {
   // Sección activa de la navegación.
   active: AppSection;
   // El usuario de requireUser(): nombre, foto y almas del bloque del
-  // personaje, y la racha guardada con el día del último golpe para la llama.
-  user: CharacterUser & { flame: number; lastStrikeDay?: Date | null };
+  // personaje, y la racha guardada con el día del último golpe y las brasas
+  // para la llama.
+  user: CharacterUser & { flame: number; lastStrikeDay?: Date | null; embers: number };
   // Cabecera de la página: título (h1) y subtítulo.
   title: string;
   description: string;
@@ -55,8 +56,10 @@ export function AppShell({
   children,
 }: AppShellProps) {
   // La llama se calcula una vez al pintar, con el "hoy" de Colombia, y no se
-  // escribe nada en la base: la racha guardada solo cambia al golpear.
-  const flame = flameState(user.flame, user.lastStrikeDay ?? null, todayInAppTimeZone());
+  // escribe nada en la base: la racha y las brasas guardadas solo cambian al
+  // golpear, con la misma regla (flameAfterStrike).
+  const flame = flameState(user.flame, user.lastStrikeDay ?? null, todayInAppTimeZone(), user.embers);
+  const flameNotice = flame.extinguished || flame.status === "protected";
 
   return (
     <div className="flex flex-1 flex-col md:flex-row">
@@ -178,13 +181,16 @@ export function AppShell({
         <div className="px-4 pt-6 pb-8 md:px-8 md:py-10 lg:px-12">
           {/* Avisos al entrar: justo debajo de la cabecera, antes del
               contenido de la página. Primero lo que se perdió o se ganó en la
-              mazmorra, y al final la llama. */}
-          {(notices.length > 0 || flame.extinguished) && (
+              mazmorra, y al final la llama (apagada o protegida por brasas). */}
+          {(notices.length > 0 || flameNotice) && (
             <div className="mb-6 flex flex-col gap-3">
               {notices.map((notice) => (
                 <RedemptionNotice key={notice.kind} notice={notice} />
               ))}
               {flame.extinguished && <ExtinguishedFlameNotice />}
+              {flame.status === "protected" && (
+                <ProtectedFlameNotice embersToSpend={flame.embersToSpend} />
+              )}
             </div>
           )}
           {children}
