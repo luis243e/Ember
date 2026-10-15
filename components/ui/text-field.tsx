@@ -11,6 +11,11 @@ const FIELD_BASE =
 // por TextField.
 export const inputStyles = cn(FIELD_BASE, "px-4");
 
+// Contraseña (PasswordField): la misma caja con sitio a la derecha para el
+// botón del ojo (44 px + margen), así el texto nunca queda debajo de él. No
+// se hace con cn(inputStyles, "pr-12"): cn no resuelve conflictos.
+export const passwordInputStyles = cn(FIELD_BASE, "pr-12 pl-4");
+
 // <select>: la misma caja, sin la flecha del navegador (appearance-none) y con
 // sitio a la derecha para un chevron que se dibuja encima. truncate pone
 // puntos suspensivos si la opción elegida no cabe. No se hace con

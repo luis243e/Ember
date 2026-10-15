@@ -53,12 +53,15 @@ import { formatCountdown } from "@/app/mazmorra/batalla/[id]/countdown";
 // victoria (solo si el jefe cayó), recoveredSouls las que vuelven al cumplir
 // la misión de redención (solo si este golpe la cumplió), newLevel el nivel
 // alcanzado (solo si se subió) y embersSpent / embersLeft las brasas que
-// salvaron la llama y las que quedan (solo si alguna se gastó).
+// salvaron la llama y las que quedan (solo si alguna se gastó). lateFall: el
+// golpe contó, pero el jefe no murió y su día de entrega ya pasó (vigilia
+// que cruzó la medianoche): caerá en la próxima revisión.
 export type ResultadoBatalla =
   | {
       ok: true;
       currentHp?: number;
       defeated?: boolean;
+      lateFall?: boolean;
       strikeSouls?: number;
       victorySouls?: number;
       recoveredSouls?: number;
@@ -307,19 +310,28 @@ export async function asestarGolpeDe(
     // las almas de antes, no con la columna.
     const leveledUp = level > levelForSouls(owner.souls).level;
 
+    // ¿Sigue vivo con su día de entrega ya terminado? Entonces la próxima
+    // revisión lo marca FAILED (ahora ya no tiene vigilia abierta que lo
+    // proteja). Se avisa a la pantalla, que enseña el resultado antes de
+    // salir, y no se crea un contraataque que nadie podría contestar (la
+    // batalla de un jefe caído redirige a la mazmorra).
+    const lateFall = !defeated && locked.dueDate < todayDateInAppTimeZone(now);
+
     return {
       resultado: {
         ok: true,
         currentHp,
         defeated,
+        ...(lateFall && { lateFall }),
         strikeSouls,
         victorySouls,
         recoveredSouls: recoveredSouls > 0 ? recoveredSouls : undefined,
         newLevel: leveledUp ? level : undefined,
         ...(flame.embersSpent > 0 && { embersSpent: flame.embersSpent, embersLeft: flame.embers }),
       },
-      // El contraataque solo si el jefe sigue vivo: si cayó, no contraataca.
-      studySessionId: defeated ? undefined : closed[0].id,
+      // El contraataque solo si el jefe sigue vivo y a tiempo: si cayó, o
+      // va a caer por fecha, no contraataca.
+      studySessionId: defeated || lateFall ? undefined : closed[0].id,
       difficulty: locked.difficulty,
     };
     // timeout: con la misión son hasta nueve viajes a la base (~250 ms cada

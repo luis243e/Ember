@@ -82,7 +82,11 @@ export async function asestarGolpe(taskId: string): Promise<ResultadoBatalla> {
   // al repintarse con refresh().
   const resultado = await asestarGolpeDe(user.id, task);
 
-  refresh();
+  // Golpe tardío (lateFall): SIN refresh(). Al repintarse, la revisión
+  // marcaría el jefe como caído y la página redirigiría a la mazmorra en esta
+  // misma respuesta, antes de enseñar el "+N almas". La pantalla muestra el
+  // resultado y el enlace a la mazmorra, donde la revisión hace lo suyo.
+  if (!(resultado.ok && resultado.lateFall)) refresh();
   return resultado;
 }
 

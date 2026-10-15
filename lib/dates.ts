@@ -83,3 +83,16 @@ const dueDateFormatter = new Intl.DateTimeFormat("es-CO", {
 export function formatDueDate(date: Date): string {
   return dueDateFormatter.format(date);
 }
+
+// "30 de sept de 2026": la misma fecha con el mes abreviado, para donde la
+// larga no cabe en una línea (el pie de la tarjeta de jefe a 320 px).
+const shortDueDateFormatter = new Intl.DateTimeFormat("es-CO", {
+  timeZone: "UTC",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
+export function formatDueDateShort(date: Date): string {
+  return shortDueDateFormatter.format(date);
+}

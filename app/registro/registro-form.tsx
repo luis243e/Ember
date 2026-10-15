@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { buttonStyles } from "@/components/ui/button";
+import { PasswordField } from "@/components/ui/password-field";
 import { TextField } from "@/components/ui/text-field";
 import { cn } from "@/lib/cn";
 import { registrarse, type EstadoRegistro } from "./actions";
@@ -43,10 +44,9 @@ export function RegistroForm() {
           required
           defaultValue={estado.valores.email}
         />
-        <TextField
+        <PasswordField
           id="password"
           name="password"
-          type="password"
           label="Contraseña"
           hint="Mínimo 8 caracteres"
           autoComplete="new-password"

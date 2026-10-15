@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { cardStyles } from "@/components/ui/card";
 import { HpBar } from "@/components/ui/hp-bar";
 import { cn } from "@/lib/cn";
-import { formatDueDate } from "@/lib/dates";
+import { formatDueDate, formatDueDateShort } from "@/lib/dates";
 import { bossForTask, bossImageSrc, DIFFICULTY_LABELS } from "@/lib/game";
 
 type BossCardProps = {
@@ -31,7 +31,9 @@ export function BossCard({ task, eager = false }: BossCardProps) {
   const boss = bossForTask(task);
 
   return (
-    <li className={cn(cardStyles, "flex min-w-0 flex-col gap-4.5 p-5 md:p-6")}>
+    // @container: el pie elige el formato de la fecha según el ancho de la
+    // tarjeta, no el de la ventana.
+    <li className={cn(cardStyles, "@container flex min-w-0 flex-col gap-4.5 p-5 md:p-6")}>
       {/* Miniatura: recorte de la ilustración de la batalla. Alto fijo (112
           px en móvil, 132 desde md); thumbPosition elige qué parte se ve para
           que no se corte la cabeza. El alt dice qué criatura es: el nombre de
@@ -73,7 +75,15 @@ export function BossCard({ task, eager = false }: BossCardProps) {
           <Calendar aria-hidden size={16} className="shrink-0 text-smoke" />
           {/* El icono no se lee: este texto aclara qué fecha es. */}
           <span className="sr-only">Entrega: </span>
-          {formatDueDate(task.dueDate)}
+          {/* Larga si el contenido de la tarjeta (sin el relleno: es lo que
+              mide la consulta de contenedor) mide 17,5rem (280 px) o más; si
+              no, con el mes abreviado. La más larga, "30 de septiembre de
+              2026", necesita 276 px con el icono y "Atacar": a 320 px (246)
+              no cabe y se partía en dos líneas; a 360 (286) sí. Solo se
+              muestra una (la otra, display: none, tampoco la lee el lector
+              de pantalla). */}
+          <span className="hidden @min-[17.5rem]:inline">{formatDueDate(task.dueDate)}</span>
+          <span className="@min-[17.5rem]:hidden">{formatDueDateShort(task.dueDate)}</span>
         </p>
         {/* El ::after agranda la zona de clic a 44 px de alto sin cambiar el
             tamaño del pie. El texto oculto distingue un "Atacar" de otro. */}

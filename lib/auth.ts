@@ -4,9 +4,17 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { after } from "next/server";
-import { sendExistingAccountNotice, sendVerificationLink } from "@/lib/auth-emails";
+import {
+  sendExistingAccountNotice,
+  sendPasswordResetLink,
+  sendVerificationLink,
+} from "@/lib/auth-emails";
 import { prisma } from "@/lib/prisma";
-import { VERIFICATION_LINK_SECONDS, VERIFY_CALLBACK_PATH } from "@/lib/verification";
+import {
+  RESET_LINK_SECONDS,
+  VERIFICATION_LINK_SECONDS,
+  VERIFY_CALLBACK_PATH,
+} from "@/lib/verification";
 
 export const auth = betterAuth({
   // Better Auth lee y escribe usuarios, sesiones y cuentas a través de
@@ -41,6 +49,32 @@ export const auth = betterAuth({
         await auth.api.sendVerificationEmail({
           body: { email: user.email, callbackURL: VERIFY_CALLBACK_PATH },
         });
+      });
+    },
+
+    // "¿Olvidaste tu contraseña?". Better Auth responde lo mismo exista o no
+    // la cuenta, y solo llama aquí si existe; el envío va en segundo plano
+    // para que el tiempo tampoco lo delate. El límite por cuenta y el
+    // callbackURL se aplican dentro. `url` lleva el token: nunca se registra.
+    sendResetPassword: async ({ user, url }) => {
+      inBackground(() => sendPasswordResetLink(user, url));
+    },
+    // El token se guarda en la tabla Verification y se BORRA al usarlo
+    // (consumeVerificationValue): sirve una sola vez, y uno caducado se
+    // rechaza igual.
+    resetPasswordTokenExpiresIn: RESET_LINK_SECONDS,
+    // Con la contraseña nueva se cierran TODAS las sesiones de la cuenta
+    // (Better Auth no lo hace por defecto): si alguien conocía la vieja y
+    // había entrado, queda fuera. Se aplica después de onPasswordReset.
+    revokeSessionsOnPasswordReset: true,
+    // Abrir el enlace demuestra que el correo es suyo, lo mismo que el de
+    // verificación: queda verificado (Better Auth no lo toca). Así el dueño
+    // de un correo que otro registró sin verificarlo (secuestro previo)
+    // entra con SU contraseña sin otro correo más. Solo cambia si hacía falta.
+    onPasswordReset: async ({ user }) => {
+      await prisma.user.updateMany({
+        where: { id: user.id, emailVerified: false },
+        data: { emailVerified: true },
       });
     },
   },

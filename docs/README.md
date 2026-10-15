@@ -69,11 +69,22 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   (`requireUser()`). Registrarse con un correo existente muestra la misma
   pantalla "Revisa tu correo" y avisa al dueño por correo. Límite de 1 correo
   por minuto y 5 en 24 h por cuenta. Probado en local, también con el Gmail
-  de Luis; **antes del push hay que crear `GMAIL_USER` y
-  `GMAIL_APP_PASSWORD` en Vercel**. Detalles en
+  de Luis. `GMAIL_USER` y `GMAIL_APP_PASSWORD` ya están en Vercel
+  (*Production*). Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
 - **Fase 2 completa (14 oct).** Banco de preguntas, contraataque, escriba,
   preguntas que vuelven y brasa.
+- **Pulido antes de la Fase 3 (14 oct, sin commit):** «¿Olvidaste tu
+  contraseña?» en `/login` → `/olvide-contrasena` (siempre la misma
+  respuesta; correo en segundo plano y con el límite por cuenta) →
+  enlace de un solo uso de 1 h → `/restablecer-contrasena`. Al guardar se
+  cierran todas las sesiones, el correo queda verificado (cierra el
+  secuestro previo) y se vuelve a `/login` con «Contraseña cambiada».
+  `PasswordField` (el ojo) en `/login`, `/registro` y
+  `/restablecer-contrasena`. Arreglados el gris antes de tiempo de la
+  batalla, la mazmorra vacía, la fecha a 320 px y el golpe tardío
+  (`lateFall`). Sin migraciones ni dependencias. Detalles en
+  [2026-10-14-pulido-antes-de-fase-3.md](sesiones/2026-10-14-pulido-antes-de-fase-3.md).
 - **Fase 2 · paso 5: la brasa (14 oct, sin commit):** un comodín que salva la
   llama. Se gana al terminar un contraataque perfecto (todas del banco, sin
   genéricas, y todas acertadas) contra un jefe medio o difícil; máximo 2
@@ -116,8 +127,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   REST de Gemini, sin dependencias). Además, **el contraataque lanza 1, 2 o 3
   preguntas según la dificultad del jefe** (fácil, media, difícil). Probado
   en local (script de 113 comprobaciones con el payload, 2 llamadas reales a
-  Gemini y Chrome, también a 320 px). Un 503 de Gemini se reintenta una vez. **Antes del push hay que crear
-  `GEMINI_API_KEY` y `GEMINI_MODEL` en Vercel.** Detalles en
+  Gemini y Chrome, también a 320 px). Un 503 de Gemini se reintenta una vez.
+  `GEMINI_API_KEY` y `GEMINI_MODEL` ya están en Vercel (*Production*).
+  Detalles en
   [2026-10-11-el-escriba.md](sesiones/2026-10-11-el-escriba.md).
 - **Fase 2 · paso 2: el contraataque (10 oct, commit `6026efc`):** después de un
   golpe que no derrota al jefe, el jefe contraataca con hasta 3 preguntas de
@@ -626,10 +638,21 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   archivo que sabe de Gmail: para pasar a Resend, solo se cambia ese.
 - **nodemailer fijado exacto en 10.0.10,** como better-auth.
 - **Los correos de acceso pasan siempre por el límite por cuenta**
-  (`claimAuthEmail` en `lib/auth-emails.ts`: 1 por minuto, 5 en 24 h). Lo de
-  Better Auth (por IP) no cuenta las Server Actions.
+  (`claimAuthEmail` en `lib/auth-emails.ts`: 1 por minuto, 5 en 24 h, un
+  solo contador para verificación, «ya tienes una cuenta» y restablecimiento).
+  Lo de Better Auth (por IP) no cuenta las Server Actions.
+- **Sin configuración de correo, en producción o en Vercel el envío falla;
+  nunca se imprime.** Los enlaces son llaves y no deben acabar en los logs.
+  Solo `next dev` en local escribe el correo en la consola.
+- **Restablecer la contraseña cierra todas las sesiones y verifica el
+  correo** (`revokeSessionsOnPasswordReset` y `onPasswordReset` en
+  `lib/auth.ts`). No quitar ninguna de las dos: juntas cierran el secuestro
+  previo.
+- **De la URL nunca se pinta texto.** Parámetros como `?aviso=` se comparan
+  con una lista de valores conocidos y los textos viven en el código.
 - **Ninguna pantalla de acceso delata si un correo está registrado,** ni por
-  el texto ni por el tiempo: el registro y el reenvío responden igual, y los
+  el texto ni por el tiempo: el registro, el reenvío y «olvidé mi
+  contraseña» responden igual, y los
   correos se envían después de responder (`inBackground()` con `after()` en
   `lib/auth.ts`). El reenvío llama a `auth.api.sendVerificationEmail` **sin
   `headers`**.
@@ -641,7 +664,17 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   intercepta el TLS: puerto 587 y `NODE_OPTIONS=--use-system-ca` en ese
   equipo.
 - **El enlace de verificación es una llave de entrada durante una hora**
-  (`autoSignInAfterVerification`): nunca se registra en producción.
+  (`autoSignInAfterVerification`): nunca se registra en producción. El de
+  restablecimiento es de un solo uso (se borra de `Verification`), dura
+  1 h y no abre sesión.
+- **Los campos de contraseña usan `PasswordField`**
+  (`components/ui/password-field.tsx`), con su `autoComplete`
+  (`current-password` o `new-password`).
+- **Para parar `next dev`, terminar el proceso del puerto 3000**
+  (`Get-NetTCPConnection -LocalPort 3000`) y comprobar que queda libre: parar
+  el shell que lo lanzó puede dejar el servidor vivo.
+- **Las consultas de contenedor miden el contenido del contenedor, sin su
+  relleno.** Medir en el navegador antes de elegir el corte.
 - **`cn` no resuelve conflictos de clases:** solo las junta. El `className`
   de un componente sirve para añadir clases, no para cambiar una que ya pone
   (gana la que Tailwind escribe después en su CSS, no la última). Para
@@ -727,22 +760,17 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Si se quiere el aviso «una brasa salvó tu llama» fuera de la batalla
   (en AppShell, el resto del día), hace falta una columna (por ejemplo
   `User.emberSavedDay`). Hoy solo sale justo después del golpe.
-- [ ] **Secuestro previo de cuenta.** Alguien puede registrar un correo
-  ajeno con su contraseña y, como el reenvío no la pide, hacer que al dueño
-  le lleguen enlaces de verificación. Si el dueño abre uno, entra
-  (`autoSignInAfterVerification`) en una cuenta cuya contraseña conoce el
-  otro. `onExistingUserSignUp` no recibe la contraseña nueva (solo `{ user }`,
-  y la `Request` es `undefined` cuando se llama desde una Server Action), y
-  reemplazarla con un `hooks.before` no lo cierra: ganaría el último en
-  registrarse, y los enlaces anteriores (JWT de 1 h) siguen valiendo.
-  **Arreglo: "olvidé mi contraseña"** (`sendResetPassword` de Better Auth),
-  para que el dueño del correo ponga la suya. Mientras tanto, el correo de
-  verificación dice "si no creaste una cuenta en Ember, ignora este correo".
-- [ ] **ANTES del push de la verificación de correo: crear en Vercel, solo
-  en *Production*, `GMAIL_USER` y `GMAIL_APP_PASSWORD`** (esta, como
-  *Sensitive*). Sin ellas nadie recibe el enlace y nadie puede entrar, ni las
-  cuentas que ya existen. `BETTER_AUTH_URL` ya está bien
-  (`https://ember-five-taupe.vercel.app`).
+- [ ] Confirmar que llegó a Gmail el correo «Crea una contraseña nueva para
+  Ember» enviado en local a `lemeza364+prueba2@gmail.com` (14 oct).
+- [ ] **Nombre heredado del secuestro previo:** tras restablecer, la cuenta
+  conserva el nombre de vigilante que puso quien la registró, y hoy no se
+  puede editar. Se resuelve cuando exista editar el perfil.
+- [ ] Probar «olvidé mi contraseña» y el ojo con lector de pantalla, en
+  Safari y Firefox y con gestores de contraseñas; y en producción después
+  del push.
+- [ ] Corregir el comentario de `Verification.value` en el schema la próxima
+  vez que cambie: en el restablecimiento el token va en `identifier` y el id
+  del usuario en `value`.
 - [ ] **Después del push:** mirar en el log del build que se aplica
   `20261010214056_limite_correos_auth` (la primera migración que aplica el
   build de verdad) y probar en producción el registro, el correo (enviado
@@ -753,8 +781,6 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   captcha o un tope global de envíos.
 - [ ] **Los correos salen de la dirección personal de Gmail de Luis.** Pasar
   a Resend con dominio propio (solo `lib/email.ts`).
-- [ ] **El token del enlace queda en los logs de peticiones** (`next dev` y
-  Vercel) hasta que caduca (1 h). Solo los ve Luis.
 - [ ] Probar "Revisa tu correo" y `/verificar-correo` a 320 px, con lector de
   pantalla y en Safari y Firefox. Confirmar que llegaron a Gmail el aviso
   "Ya tienes una cuenta" (`+prueba2`) y el reenvío al entrar sin verificar
@@ -766,7 +792,9 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   `20261011011609_contraataque`.
 - [ ] Contraataque a medias de un jefe que después cae por fecha: no se ve
   (su batalla redirige a la mazmorra) hasta que la vigilia siguiente lo
-  cierra. Decidir si enseñarlo en otro sitio.
+  cierra. Decidir si enseñarlo en otro sitio. Desde el 14 oct el golpe
+  tardío ya no crea uno; sigue pudiendo pasar con uno de antes de la
+  medianoche que se dejó sin terminar.
 - [ ] Si otra pestaña empieza una vigilia justo entre un golpe y la creación
   de su contraataque, ese contraataque queda abierto hasta la vigilia
   siguiente (sin consecuencias: solo da sus preguntas).
@@ -774,11 +802,9 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   ~2 s (dos transacciones a la vez daban `P2028`; responder usa ahora
   `maxWait: 10_000`). Si molesta, probar `127.0.0.1` en vez de `localhost`
   en el `.env` local.
-- [ ] **ANTES del push del escriba: crear en Vercel, solo en *Production*,
-  `GEMINI_API_KEY` (como *Sensitive*) y `GEMINI_MODEL`** (Luis).
-  `EMBER_FAKE_AGENT` nunca en Vercel. Después del push: mirar que el build
-  aplica `20261012010722_escriba` y probar una invocación en producción
-  (latencia, `maxDuration`).
+- [ ] **Después del push del escriba:** mirar que el build aplica
+  `20261012010722_escriba` y probar una invocación en producción (latencia,
+  `maxDuration`). `EMBER_FAKE_AGENT` nunca en Vercel.
 - [ ] Escriba: probar con lector de pantalla, en Safari y Firefox, arrastrar
   y soltar un PDF de verdad, un PDF escaneado (solo imágenes) y uno cifrado.
 - [ ] «Añadir pregunta a mano» se queda abierto después de que el escriba
@@ -794,11 +820,6 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   automatizar).
 - [ ] Probar la redención en Vercel (medir la carga de `/mazmorra`: hace 4
   consultas en paralelo), con lector de pantalla y en Safari y Firefox.
-- [ ] Golpe a un jefe vencido que no muere (vigilia que cruzó la
-  medianoche): tras el golpe, la batalla redirige a la mazmorra y no se ve
-  el "+N almas". Decidir si mostrar antes el resultado.
-- [ ] La mazmorra vacía dice "Todavía no has invocado ningún jefe" aunque
-  haya jefes vencidos o caídos.
 - [ ] Cuando se puedan borrar jefes: `RedemptionMission.taskId` es
   `ON DELETE CASCADE` y borraría la misión con el jefe.
 - [ ] Prisma con `pgbouncer=true` añade `BEGIN`, `DEALLOCATE ALL` y `COMMIT`
@@ -814,10 +835,6 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   equipo contra Supabase cada acción tardaba ~3 s; contra la base local,
   ~0,2 s en `next dev` y ~0,05 s en `next start`), con lector de pantalla,
   con movimiento reducido real y en Safari y Firefox.
-- [ ] Batalla: al dar el golpe final, la escena se pone gris un instante antes
-  de que llegue la vida nueva.
-- [ ] Tarjeta de jefe a 320 px: la fecha ocupa dos líneas junto a "Atacar"
-  (sin desbordar).
 
 - [ ] **Índice único sobre `(userId, lower(name))` en `Subject`** para
   cerrar la carrera del duplicado: dos envíos casi simultáneos pueden crear
@@ -850,6 +867,31 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Probar en producción el cierre de sesión.
 - [ ] Si la base de producción se recrea, volver a activar a mano el RLS de
   `_prisma_migrations` (en la local no hace falta: no tiene API pública).
+- [x] ~~`PasswordField`: etiqueta que cambia y `aria-pressed` a la vez~~
+  (14 oct): se quitó `aria-pressed` y queda solo el `aria-label` que cambia,
+  el patrón recomendado cuando la etiqueta cambia (decisión de Luis).
+- [x] ~~Crear en Vercel (*Production*) `GMAIL_USER` y `GMAIL_APP_PASSWORD`~~
+  (hecho por Luis desde la verificación de correo) ~~y `GEMINI_API_KEY` y
+  `GEMINI_MODEL`~~ (también hechas).
+- [x] ~~Secuestro previo de cuenta~~ (14 oct, sin commit): con «olvidé mi
+  contraseña» el dueño del correo pone la suya, el correo queda verificado y
+  se cierran todas las sesiones. Probado de punta a punta en
+  `scripts/probar-restablecer.ts`. Queda el nombre heredado (pendiente).
+- [x] ~~El token del enlace queda en los logs de peticiones~~ (14 oct): el de
+  restablecimiento también acaba ahí (ruta y query), pero se borra al
+  usarse, caduca en 1 h y no abre sesión. Luis decidió que basta (sin
+  fragmento `#token`). El de verificación sigue igual: solo lo ve Luis.
+  Explicado en
+  [2026-10-14-pulido-antes-de-fase-3.md](sesiones/2026-10-14-pulido-antes-de-fase-3.md#el-token-en-los-logs).
+- [x] ~~Golpe a un jefe vencido que no muere: no se ve el "+N almas"~~
+  (14 oct): `lateFall`, sin `refresh()`, la batalla enseña el resultado y el
+  aviso antes de salir, y no se crea un contraataque imposible de contestar.
+- [x] ~~La mazmorra vacía dice "Todavía no has invocado ningún jefe" aunque
+  haya jefes vencidos o caídos~~ (14 oct): un texto para cada caso.
+- [x] ~~Batalla: la escena se pone gris antes de que llegue la vida nueva~~
+  (14 oct): `defeated && justDefeated`.
+- [x] ~~Tarjeta de jefe a 320 px: la fecha en dos líneas~~ (14 oct): fecha
+  corta con una consulta de contenedor.
 - [x] ~~Fase 2 · paso 5: la brasa~~ (14 oct, sin commit): se gana con un
   contraataque perfecto del banco contra un jefe medio o difícil (máximo 2),
   se gasta sola al golpear si hubo días perdidos, llama protegida, chip,
@@ -950,4 +992,5 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-10 | Fase 2 · paso 2: el contraataque (`Counterattack` con `items` en `jsonb`, permutación con `node:crypto`, valor esperado 0, índice único por vigilia, orden de bloqueos ampliado, `lib/battle.ts`, panel modal accesible) | [2026-10-10-contraataque.md](sesiones/2026-10-10-contraataque.md) |
 | 2026-10-11 | Fase 2 · paso 3: el escriba (Gemini por `fetch`, salida estructurada, inyección de prompt, PDF en base64 con páginas contadas sin dependencias y topes contra bombas, preguntas selladas con `Question.sealed`, límite diario con reserva `PENDING`, «Retírala», contraataque según la dificultad) | [2026-10-11-el-escriba.md](sesiones/2026-10-11-el-escriba.md) |
 | 2026-10-14 | Fase 2 · paso 5: la brasa (cierra la Fase 2): `User.embers` con `CHECK`, `Counterattack.bossDifficulty`, evaluación perezosa compartida con `flameOutlook()`, llama protegida, chip, píldora y avisos, `input: false` probado contra el servidor | [2026-10-14-la-brasa.md](sesiones/2026-10-14-la-brasa.md) |
+| 2026-10-14 | Pulido antes de la Fase 3: «olvidé mi contraseña» (token de un solo uso, sin enumeración, sesiones cerradas, secuestro previo cerrado), `PasswordField` y cuatro errores visuales (gris, mazmorra vacía, fecha a 320 px, golpe tardío) | [2026-10-14-pulido-antes-de-fase-3.md](sesiones/2026-10-14-pulido-antes-de-fase-3.md) |
 | 2026-10-12 | Fase 2 · paso 4: las preguntas que vuelven (repetición espaciada tipo Leitner, días de calendario de Bogotá, migración con relleno en SQL comprobado contra `nextReview`, reserva para nuevas, `FOR UPDATE` del nivel, «Repaso» y estados del banco) | [2026-10-12-preguntas-que-vuelven.md](sesiones/2026-10-12-preguntas-que-vuelven.md) |

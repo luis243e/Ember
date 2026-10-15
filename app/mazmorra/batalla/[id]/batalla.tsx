@@ -49,13 +49,15 @@ type BatallaProps = {
 };
 
 // idle = sin vigilia; running = vigilia en curso; ready = cumplida, falta el
-// golpe; defeated = el jefe ya cayó.
-type Phase = "idle" | "running" | "ready" | "defeated";
+// golpe; late = golpe asestado, pero el plazo del jefe ya pasó y caerá en tu
+// contra; defeated = el jefe ya cayó.
+type Phase = "idle" | "running" | "ready" | "late" | "defeated";
 
 const CLOCK_LABELS: Record<Phase, string> = {
   idle: "Próxima vigilia",
   running: "Vigilia en curso",
   ready: "Vigilia cumplida",
+  late: "",
   defeated: "",
 };
 
@@ -102,6 +104,10 @@ export function Batalla({
   const [emberSaved, setEmberSaved] = useState<{ spent: number; left: number } | null>(null);
   const [hitting, setHitting] = useState(false);
   const [justDefeated, setJustDefeated] = useState(false);
+  // Golpe tardío (vigilia que cruzó la medianoche y jefe que no muere): la
+  // acción no repinta la página (si no, redirigiría a la mazmorra antes de
+  // enseñar nada), así que la vida nueva llega aquí.
+  const [late, setLate] = useState<{ currentHp: number; souls: number } | null>(null);
   const paused = useSyncExternalStore(subscribePause, readPause, () => false);
   // El panel del contraataque está abierto: la batalla de detrás queda inerte
   // (ni el ratón, ni el Tab, ni el lector de pantalla llegan a ella).
@@ -115,11 +121,16 @@ export function Batalla({
   const defeated = task.status === "DEFEATED";
   const phase: Phase = defeated
     ? "defeated"
-    : endsAt === null
-      ? "idle"
-      : remaining > 0
-        ? "running"
-        : "ready";
+    : late
+      ? "late"
+      : endsAt === null
+        ? "idle"
+        : remaining > 0
+          ? "running"
+          : "ready";
+  // La vida que se ve: la del golpe tardío, si lo hubo (la página no se
+  // repintó), o la de la página.
+  const currentHp = late?.currentHp ?? task.currentHp;
   const showConfirm = confirming && phase === "running";
   // Otro jefe tiene la vigilia abierta: aquí no se puede comenzar.
   const blockedByOther = phase === "idle" && otherVigil !== null;
@@ -173,6 +184,13 @@ export function Batalla({
     panelWasOpen.current = panelOpen;
   }, [panelOpen]);
 
+  // Golpe tardío: el botón principal desaparece, y el foco pasa al aviso
+  // (si no, se iría a <body>).
+  const lateRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (late) lateRef.current?.focus();
+  }, [late]);
+
   // Llama a una acción con solo el id de la tarea. La acción ya vuelve a
   // pintar la página (refresh), así que aquí solo hay mensajes y animación.
   function run(
@@ -225,6 +243,11 @@ export function Batalla({
           setAnnouncement(
             `Abominación vencida. Ganas ${formatNumber(souls)} almas del golpe y ${formatNumber(result.victorySouls ?? 0)} por la victoria.${levelText}`,
           );
+        } else if (result.lateFall) {
+          // El aviso, que recibe el foco, ya dice las almas y lo que pasa:
+          // la región viva solo añade lo demás (redención, nivel, brasa).
+          setLate({ currentHp: result.currentHp ?? task.currentHp, souls });
+          setAnnouncement(levelText.trim());
         } else {
           setAnnouncement(
             `Golpe asestado. Ganas ${formatNumber(souls)} almas. Al jefe le quedan ${result.currentHp} de ${task.maxHp} de vida.${levelText}`,
@@ -240,7 +263,8 @@ export function Batalla({
     );
   }
 
-  const hint = otherVigil
+  const hint =
+    otherVigil || phase === "late"
     ? null
     : phase === "running"
       ? "La vigilia no se puede pausar. Si abandonas, el jefe no recibe daño."
@@ -325,7 +349,11 @@ export function Batalla({
                     "object-cover",
                     // El gris final queda fijo; la animación solo lleva hasta él.
                     defeated && "opacity-90 brightness-55 grayscale",
-                    justDefeated && "motion-safe:animate-perish",
+                    // Solo cuando ya llegó la página con el jefe vencido: el
+                    // resultado de la acción (justDefeated) se pinta antes
+                    // que el refresh(), y sin `defeated` la escena se ponía
+                    // gris con la vida vieja todavía en pantalla.
+                    defeated && justDefeated && "motion-safe:animate-perish",
                   )}
                 />
               </div>
@@ -397,15 +425,41 @@ export function Batalla({
                   Vida
                 </span>
                 <span className="text-[13px] font-semibold text-parchment @2xl:text-sm">
-                  {task.currentHp} / {task.maxHp}
+                  {currentHp} / {task.maxHp}
                 </span>
               </p>
-              <HpBar current={task.currentHp} max={task.maxHp} size="lg" />
+              <HpBar current={currentHp} max={task.maxHp} size="lg" />
             </div>
           </div>
 
+          {/* Golpe tardío: en el sitio del reloj y el botón, lo ganado (el
+              "+N almas" de la escena se desvanece: aquí se queda), el aviso de
+              que el jefe se impone y la salida. tabIndex -1: recibe el foco. */}
+          {late && (
+            <div className="flex flex-col px-4 pt-5 @2xl:absolute @2xl:inset-x-0 @2xl:bottom-0 @2xl:items-end @2xl:p-5">
+              <div className="flex flex-col gap-4 rounded-[10px] border border-line bg-surface p-4 @2xl:max-w-md @2xl:bg-night/92">
+                <div
+                  ref={lateRef}
+                  tabIndex={-1}
+                  className="flex flex-col gap-2 leading-normal outline-none"
+                >
+                  <p className="font-display text-[15px] font-bold text-gold-bright">
+                    Golpe asestado: +{formatNumber(late.souls)} almas
+                  </p>
+                  <p className="text-sm wrap-anywhere text-parchment">
+                    Pero el plazo de «{task.name}» ya terminó: el jefe se impone. En la mazmorra
+                    verás lo que te cuesta.
+                  </p>
+                </div>
+                <ButtonLink href="/mazmorra" size="md" className="w-full">
+                  Volver a la mazmorra
+                </ButtonLink>
+              </div>
+            </div>
+          )}
+
           {/* Reloj y botón: abajo, uno a cada lado (escritorio) o apilados. */}
-          {!defeated && (
+          {!defeated && phase !== "late" && (
             <div className="flex flex-col gap-5 px-4 pt-5 @2xl:absolute @2xl:inset-x-0 @2xl:bottom-0 @2xl:flex-row @2xl:items-end @2xl:justify-between @2xl:gap-4 @2xl:p-5">
               <div className="flex flex-col items-center gap-0.5 rounded-[10px] border border-line bg-surface px-5 pt-4.5 pb-3.5 leading-[normal] whitespace-nowrap @2xl:rounded-lg @2xl:bg-night/92 @2xl:px-5.5 @2xl:pt-3.5 @2xl:pb-3">
                 <p className="font-display text-[13px] tracking-[2px] text-gold uppercase">

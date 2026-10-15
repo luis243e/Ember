@@ -9,7 +9,8 @@
 //      vez, contestar tarde, el contraataque de otro usuario;
 //   4. las genéricas (nunca restan, no escriben intentos);
 //   5. el suelo del nivel, subir de nivel contestando y una pregunta borrada;
-//   6. que una vigilia nueva cierra el contraataque sin terminar.
+//   6. que una vigilia nueva cierra el contraataque sin terminar;
+//   7. el golpe tardío (fecha pasada, jefe vivo): lateFall y sin contraataque.
 // Llama directamente al corazón de la batalla (lib/battle.ts), sin la capa de
 // las Server Actions (que solo añade la sesión y el 404).
 // Crea dos usuarios temporales y los borra al final, también si alguna
@@ -423,6 +424,33 @@ async function probarConBase(userId: string, otherUserId: string): Promise<void>
   });
   const contraVencido = await comenzarVigiliaDe(userId, vencido.id);
   check("vigilia contra un jefe con la fecha pasada → rechazada", !contraVencido.ok, contraVencido);
+
+  // -------------------------------------------------------------------------
+  console.log("\n7. Golpe tardío (vigilia que cruzó la medianoche)");
+  check("un golpe a tiempo no lleva lateFall", golpe1.ok && golpe1.lateFall === undefined, golpe1);
+  // Solo puede haber una vigilia abierta: se borra la que empezó el paso 6.
+  await prisma.studySession.deleteMany({ where: { userId, completedAt: null } });
+  const ayer = new Date(Date.now() - 2 * DAY);
+  const tardio = await tarea(conPreguntas.id, "HARD", 600);
+  await prisma.task.update({ where: { id: tardio.id }, data: { dueDate: ayer } });
+  const vTardia = await vigiliaCumplida(userId, tardio.id);
+  const golpeTardio = await asestarGolpeDe(userId, tardio);
+  check(
+    "jefe con la fecha pasada que no muere → golpe aceptado con lateFall",
+    golpeTardio.ok && golpeTardio.lateFall === true && golpeTardio.defeated === false && golpeTardio.currentHp === 500,
+    golpeTardio,
+  );
+  check("y sin contraataque (nadie podría contestarlo)", (await contraataqueDe(vTardia.id)) === null);
+
+  const tardioFinal = await tarea(conPreguntas.id, "EASY", 100);
+  await prisma.task.update({ where: { id: tardioFinal.id }, data: { dueDate: ayer } });
+  await vigiliaCumplida(userId, tardioFinal.id);
+  const golpeFinalTardio = await asestarGolpeDe(userId, tardioFinal);
+  check(
+    "si el golpe tardío lo mata, cae vencido (sin lateFall)",
+    golpeFinalTardio.ok && golpeFinalTardio.defeated === true && golpeFinalTardio.lateFall === undefined,
+    golpeFinalTardio,
+  );
 }
 
 // ---------------------------------------------------------------------------

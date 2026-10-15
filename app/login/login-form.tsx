@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
+import { KeyRound, type LucideIcon } from "lucide-react";
 import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { buttonStyles } from "@/components/ui/button";
+import { PasswordField } from "@/components/ui/password-field";
 import { TextField } from "@/components/ui/text-field";
 import { cn } from "@/lib/cn";
 import { iniciarSesion } from "./actions";
@@ -10,8 +13,19 @@ import type { EstadoAcceso } from "@/app/registro/actions";
 
 const estadoInicial: EstadoAcceso = { error: null, valores: { name: "", email: "" } };
 
-// avisoVerificar: llegó aquí porque su sesión no tenía el correo verificado.
-export function LoginForm({ avisoVerificar }: { avisoVerificar: boolean }) {
+// Por qué llegó aquí (ver page.tsx): "verificar" = su sesión no tenía el
+// correo verificado; "contrasena" = acaba de crear una contraseña nueva.
+export type AvisoLogin = "verificar" | "contrasena";
+
+// Los textos viven aquí: de la URL solo llega la clave.
+const AVISOS: Record<AvisoLogin, { text: string; icon?: LucideIcon }> = {
+  verificar: {
+    text: "Verifica tu correo para entrar. Al iniciar sesión te enviaremos un nuevo enlace.",
+  },
+  contrasena: { text: "Contraseña cambiada. Ya puedes entrar.", icon: KeyRound },
+};
+
+export function LoginForm({ aviso }: { aviso: AvisoLogin | null }) {
   const [estado, accion, enviando] = useActionState(iniciarSesion, estadoInicial);
 
   // Tras un error, React vacía el formulario y lo rellena con los
@@ -28,23 +42,32 @@ export function LoginForm({ avisoVerificar }: { avisoVerificar: boolean }) {
           required
           defaultValue={estado.valores.email}
         />
-        <TextField
-          id="password"
-          name="password"
-          type="password"
-          label="Contraseña"
-          autoComplete="current-password"
-          required
-        />
+        <div className="flex flex-col gap-1">
+          <PasswordField
+            id="password"
+            name="password"
+            label="Contraseña"
+            autoComplete="current-password"
+            required
+          />
+          {/* py-3 y -my-1.5: zona de clic de 44 px de alto sin separar más
+              el enlace del campo. */}
+          <Link
+            href="/olvide-contrasena"
+            className="-my-1.5 self-end rounded-sm py-3 text-[13px] leading-[normal] font-semibold text-gold-bright hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright"
+          >
+            ¿Olvidaste tu contraseña?
+          </Link>
+        </div>
       </div>
 
       {/* Se oculta mientras se envía: al volver a aparecer, el lector de
           pantalla lo anuncia aunque el mensaje sea el mismo. */}
       {estado.error && !enviando && <Alert>{estado.error}</Alert>}
       {/* El aviso solo hasta el primer intento: después manda la respuesta. */}
-      {avisoVerificar && !estado.error && !enviando && (
-        <Alert tone="info">
-          Verifica tu correo para entrar. Al iniciar sesión te enviaremos un nuevo enlace.
+      {aviso && !estado.error && !enviando && (
+        <Alert tone="info" icon={AVISOS[aviso].icon}>
+          {AVISOS[aviso].text}
         </Alert>
       )}
 

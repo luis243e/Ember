@@ -41,12 +41,16 @@ export async function sendEmail({ to, subject, html, text }: Email): Promise<voi
   const pass = process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, "");
 
   if (!user || !pass) {
-    // En producción, sin credenciales no se puede enviar nada: error claro.
-    if (process.env.NODE_ENV === "production") {
+    // En producción, sin credenciales no se puede enviar nada: falla. El
+    // mensaje no lleva el correo ni el enlace: los enlaces son llaves (abren
+    // una sesión o cambian la contraseña) y los logs de Vercel no deben
+    // guardarlas. VERCEL lo pone Vercel en todos sus despliegues, también en
+    // los de vista previa: allí tampoco se imprime nunca.
+    if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
       throw new Error("Faltan GMAIL_USER o GMAIL_APP_PASSWORD: no se puede enviar el correo.");
     }
-    // En desarrollo no fallamos: el texto (con el enlace) va a la consola
-    // del servidor. Nunca en producción: el enlace abre una sesión.
+    // Solo en desarrollo: el texto (con el enlace) va a la consola del
+    // servidor de este equipo.
     console.info(`\n[correo de desarrollo] Para: ${to}\nAsunto: ${subject}\n\n${text}\n`);
     return;
   }

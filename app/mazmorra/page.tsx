@@ -20,6 +20,39 @@ function bossesSentence(count: number): string {
   return `${count} jefes acechan en las sombras.`;
 }
 
+// Texto de la mazmorra vacía (sin jefes vivos), según los que ya no lo están:
+// vencidos (DEFEATED) y los que te vencieron por fecha (FAILED).
+function emptyDungeonText(defeated: number, failed: number): string {
+  const next = "Invoca el siguiente cuando llegue tu próxima entrega.";
+  if (defeated === 0 && failed === 0) {
+    return "Todavía no has invocado ningún jefe. Convierte tu próxima entrega en el primero.";
+  }
+  if (failed === 0) {
+    return defeated === 1
+      ? `Has vencido al jefe que invocaste. ${next}`
+      : `Has vencido a los ${defeated} jefes que invocaste. ${next}`;
+  }
+  if (defeated === 0) {
+    return failed === 1
+      ? "No queda ningún jefe en pie: caíste ante el que invocaste. Invoca el siguiente y cobra tu revancha."
+      : `No queda ningún jefe en pie: caíste ante los ${failed} que invocaste. Invoca el siguiente y cobra tu revancha.`;
+  }
+  return `No queda ningún jefe en pie: venciste a ${defeated} y caíste ante ${failed}. ${next}`;
+}
+
+// Cuántos jefes vencidos y caídos tiene el usuario. Solo se pide con la
+// mazmorra vacía: una consulta más, y solo en ese caso.
+async function pastBosses(userId: string) {
+  const groups = await prisma.task.groupBy({
+    by: ["status"],
+    where: { status: { not: "ALIVE" }, subject: { userId } },
+    _count: { _all: true },
+  });
+  const count = (status: "DEFEATED" | "FAILED") =>
+    groups.find((g) => g.status === status)?._count._all ?? 0;
+  return { defeated: count("DEFEATED"), failed: count("FAILED") };
+}
+
 // Los jefes vivos del usuario. Task no tiene userId: los jefes del usuario
 // son los de SUS materias.
 function aliveBosses(userId: string) {
@@ -52,6 +85,7 @@ export default async function MazmorraPage() {
     aliveBosses(sessionUser.id),
   ]);
   const tasks = revised ? await aliveBosses(user.id) : firstRead;
+  const past = tasks.length === 0 ? await pastBosses(user.id) : null;
 
   return (
     <AppShell
@@ -64,7 +98,7 @@ export default async function MazmorraPage() {
       {/* La misión de redención va encima de los jefes (o del estado vacío). */}
       <div className="flex flex-col gap-4 md:gap-6">
         {activeMission && <RedemptionCard mission={activeMission} />}
-        {tasks.length === 0 ? (
+        {past ? (
           <EmptyState
             icon={<Skull size={40} />}
             title="La mazmorra está en silencio"
@@ -75,7 +109,7 @@ export default async function MazmorraPage() {
               </ButtonLink>
             }
           >
-            Todavía no has invocado ningún jefe. Convierte tu próxima entrega en el primero.
+            {emptyDungeonText(past.defeated, past.failed)}
           </EmptyState>
         ) : (
           // @container: la fila de título y botón mira el ancho de esta

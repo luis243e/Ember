@@ -3,11 +3,11 @@ import type { ReactNode } from "react";
 import { cardStyles } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 
-type AuthPage = "login" | "registro" | "verificar";
+type AuthPage = "login" | "registro" | "verificar" | "olvide" | "restablecer";
 
 // Lo único que cambia entre las pantallas (Figma "LOGIN FINAL" y
-// "REGISTRO FINAL"; la de verificar correo no tiene marco y usa el fondo del
-// login).
+// "REGISTRO FINAL"; las de verificar correo y contraseña olvidada no tienen
+// marco y usan el fondo del login).
 const PAGES: Record<
   AuthPage,
   { title: string; tagline: string; footer: string; footerLink: { href: string; label: string } }
@@ -30,9 +30,21 @@ const PAGES: Record<
     footer: "¿Ya lo confirmaste?",
     footerLink: { href: "/login", label: "Vuelve al fuego." },
   },
+  olvide: {
+    title: "Recuperar contraseña",
+    tagline: "Reaviva tu llama",
+    footer: "¿La recordaste?",
+    footerLink: { href: "/login", label: "Vuelve al fuego." },
+  },
+  restablecer: {
+    title: "Crear contraseña nueva",
+    tagline: "Forja una llave nueva",
+    footer: "¿Ya tienes acceso?",
+    footerLink: { href: "/login", label: "Vuelve al fuego." },
+  },
 };
 
-// En "verificar" ninguna pestaña está marcada.
+// En "verificar", "olvide" y "restablecer" ninguna pestaña está marcada.
 const TABS: { page: AuthPage; href: string; label: string }[] = [
   { page: "login", href: "/login", label: "Entrar" },
   { page: "registro", href: "/registro", label: "Registrarse" },
@@ -48,10 +60,11 @@ type AuthLayoutProps = {
   children: ReactNode;
 };
 
-// Fondo, logo, tarjeta, pestañas y pie compartidos por /login y /registro.
+// Fondo, logo, tarjeta, pestañas y pie compartidos por las pantallas de
+// acceso.
 export function AuthLayout({ page, children }: AuthLayoutProps) {
   const { title, tagline, footer, footerLink } = PAGES[page];
-  // El fondo de luz cálida y el resplandor: login y verificar.
+  // El fondo de luz cálida y el resplandor: todas menos registro.
   const warmLight = page !== "registro";
 
   return (

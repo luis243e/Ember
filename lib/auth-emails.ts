@@ -2,9 +2,16 @@
 // su límite por cuenta. Solo para el SERVIDOR: lo usa lib/auth.ts.
 import { sendEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
-import { linkDurationText, VERIFY_CALLBACK_PATH } from "@/lib/verification";
+import {
+  linkDurationText,
+  RESET_CALLBACK_PATH,
+  RESET_LINK_SECONDS,
+  VERIFY_CALLBACK_PATH,
+} from "@/lib/verification";
 
-// Límite por cuenta: como mucho 1 correo por minuto y 5 en 24 h.
+// Límite por cuenta: como mucho 1 correo por minuto y 5 en 24 h, contando
+// TODOS los correos de acceso juntos (verificación, "ya tienes una cuenta" y
+// contraseña nueva): un solo contador, sin columnas nuevas.
 // Lo que trae Better Auth (3 por minuto y por IP) solo cuenta las peticiones
 // HTTP a /api/auth, en memoria de cada instancia, y nuestras Server Actions
 // llaman a auth.api, que se lo salta. Este se guarda en la base.
@@ -148,6 +155,38 @@ export async function sendVerificationLink(user: { id: string; email: string }, 
   await sendEmail({
     to: user.email,
     subject: "Confirma tu correo para entrar en Ember",
+    html: renderHtml(layout),
+    text: renderText(layout),
+  });
+}
+
+// Enlace para crear una contraseña nueva. `url` es el que construye Better
+// Auth (…/api/auth/reset-password/TOKEN?callbackURL=…): al abrirlo, comprueba
+// el token y redirige a RESET_CALLBACK_PATH. Como en la verificación, aquí se
+// fija el callbackURL. Si la cuenta pasó del límite no se envía nada; el
+// token ya está guardado, pero nadie lo conoce y caduca solo.
+export async function sendPasswordResetLink(user: { id: string; email: string }, url: string) {
+  if (!(await claimAuthEmail(user.id))) return;
+
+  const link = new URL(url);
+  link.searchParams.set("callbackURL", RESET_CALLBACK_PATH);
+
+  const layout: Layout = {
+    title: "Crea una contraseña nueva",
+    paragraphs: [
+      "Alguien pidió crear una contraseña nueva para tu cuenta de Ember con este correo.",
+      "Si fuiste tú, abre el enlace y elige la nueva. Al guardarla se cerrarán todas tus sesiones abiertas.",
+    ],
+    button: { label: "Crear contraseña nueva", href: link.toString() },
+    footnotes: [
+      `El enlace caduca en ${linkDurationText(RESET_LINK_SECONDS)} y solo sirve una vez. Si caduca, pide otro desde "¿Olvidaste tu contraseña?".`,
+      "Si no lo pediste, ignora este correo: tu contraseña sigue igual.",
+    ],
+  };
+
+  await sendEmail({
+    to: user.email,
+    subject: "Crea una contraseña nueva para Ember",
     html: renderHtml(layout),
     text: renderText(layout),
   });
