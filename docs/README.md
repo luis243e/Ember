@@ -220,8 +220,20 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `components/ui/`.
 - **Video del hero (en producción desde la noche del 6 oct):** demo de 10 s
   en bucle, sin sonido, con botón Pausar/Reproducir en el pie
-  (`components/landing/hero-video.tsx`, el único componente de cliente de la
-  landing). Con `prefers-reduced-motion` solo se ve el poster.
+  (`components/landing/hero-video.tsx`). Con `prefers-reduced-motion` solo se
+  ve el poster.
+- **Landing de la Fase 2 (17 oct, sin commit):** título "Estudia. Golpea.
+  Conquista.", textos auditados para que sean ciertos hoy, cabecera fija con
+  desenfoque, jefes tenues y brasas en el hero, cuatro pasos unidos por una
+  línea que recorre una brasa, bestiario con ilustraciones (barra de 400 a
+  300 al entrar en pantalla), reloj de la vigilia que corre, sección nueva
+  **El escriba** (`#escriba`) con la maqueta del contraataque y tres FAQ
+  nuevas. Solo dos islas de cliente nuevas, `Reveal` (aparición al hacer
+  scroll con IntersectionObserver) y `VigilClock`; el resto es servidor y
+  CSS. El enlace del pie del video es ahora "Pausar animaciones" (WCAG
+  2.2.2): para el video, las brasas, los brillos y el reloj, y se recuerda
+  en `localStorage`. Detalles en
+  [2026-10-17-landing-fase-2.md](sesiones/2026-10-17-landing-fase-2.md).
 - **Login y registro con diseño (7 oct, en `origin/main` desde el commit
   `9937693`, que Vercel despliega solo):** `/login` y
   `/registro` siguen los marcos "LOGIN FINAL" y "REGISTRO FINAL" del Figma.
@@ -707,6 +719,21 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - **La landing es estática; lo interactivo va en componentes de cliente
   pequeños y aislados** (como `HeroVideo`), para no mandar al navegador más
   JavaScript del necesario.
+- **Lo que dice la landing tiene que ser cierto hoy.** Nada de "para
+  siempre" ni "∞"; "Próximamente" solo para lo que no existe. Los números
+  salen de `lib/game.ts` y `lib/agent/rules.ts` (en las maquetas, importando
+  las constantes): si cambian allí, revisar `app/page.tsx`.
+- **Nada empieza oculto en el HTML del servidor.** Las apariciones al hacer
+  scroll (`Reveal`) solo ocultan lo que el script ve fuera de la pantalla;
+  sin JavaScript o con movimiento reducido, todo se ve completo. El estado
+  inicial de una animación se escribe con
+  `group-data-[reveal=pending]/reveal:…`; el normal es el final.
+- **Toda animación nueva de la landing que se repita lleva
+  `motion-paused:[animation-play-state:paused]!`** (y si es de JavaScript,
+  lee `useAnimationsPaused()`), para que "Pausar animaciones" la pare.
+- **Capturas para revisar un diseño: `node scripts/capturas-landing.mjs`**
+  (completa, `secciones` o `desbordamiento`; ver el comentario del script).
+  Van a `capturas/`, que no entra en Git.
 - **Lo que se mueve solo lleva forma de pausarlo y respeta
   `prefers-reduced-motion`** (WCAG 2.2.2). Si basta con CSS o HTML (como
   `<source media>`), sin JavaScript. Las animaciones son tokens
@@ -746,6 +773,14 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   `documentar-sesion`. Los commits los hace Luis a mano.
 
 ## Pendientes
+
+- [ ] Regenerar el video y el póster del hero con "Asestar golpe" (hoy el
+  botón del video dice "ATACAR").
+- [ ] Landing: decidir si se ensanchan el bloque del bestiario y el reloj a
+  520 px (como el contraataque) para que quede menos aire entre texto y
+  maqueta.
+- [ ] Landing de la Fase 2: probar en Safari, Firefox, un iPhone y con lector
+  de pantalla, y el movimiento reducido a mano en DevTools.
 
 - [ ] Borrar `@@index([subjectId])` de `Question` en una migración futura: el
   índice `(subjectId, reviewDueAt)` del paso 4 lo cubre. No se borró porque
@@ -994,3 +1029,4 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-14 | Fase 2 · paso 5: la brasa (cierra la Fase 2): `User.embers` con `CHECK`, `Counterattack.bossDifficulty`, evaluación perezosa compartida con `flameOutlook()`, llama protegida, chip, píldora y avisos, `input: false` probado contra el servidor | [2026-10-14-la-brasa.md](sesiones/2026-10-14-la-brasa.md) |
 | 2026-10-14 | Pulido antes de la Fase 3: «olvidé mi contraseña» (token de un solo uso, sin enumeración, sesiones cerradas, secuestro previo cerrado), `PasswordField` y cuatro errores visuales (gris, mazmorra vacía, fecha a 320 px, golpe tardío) | [2026-10-14-pulido-antes-de-fase-3.md](sesiones/2026-10-14-pulido-antes-de-fase-3.md) |
 | 2026-10-12 | Fase 2 · paso 4: las preguntas que vuelven (repetición espaciada tipo Leitner, días de calendario de Bogotá, migración con relleno en SQL comprobado contra `nextReview`, reserva para nuevas, `FOR UPDATE` del nivel, «Repaso» y estados del banco) | [2026-10-12-preguntas-que-vuelven.md](sesiones/2026-10-12-preguntas-que-vuelven.md) |
+| 2026-10-17 | Landing de la Fase 2: textos auditados ("Estudia. Golpea. Conquista."), cabecera fija, jefes y brasas en el hero, islas `Reveal` (IntersectionObserver) y `VigilClock`, bestiario, sección El escriba, máscaras de degradado, rejilla de dos columnas, "Pausar animaciones" (`@custom-variant`, `localStorage`), `scripts/capturas-landing.mjs` (CDP) | [2026-10-17-landing-fase-2.md](sesiones/2026-10-17-landing-fase-2.md) |

@@ -24,7 +24,7 @@ const cinzelDecorative = Cinzel_Decorative({
 export const metadata: Metadata = {
   title: "Ember",
   description:
-    "Convierte tus tareas en jefes y tus horas de estudio en golpes. Estudiar, pero como un RPG.",
+    "Convierte tus entregas en jefes y cada bloque de 25 minutos de estudio en un golpe. Estudiar, pero como un RPG.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

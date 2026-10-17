@@ -30,7 +30,7 @@ export function SectionHeading({ eyebrow, title, description, size = "md" }: Sec
       {description && (
         <p
           className={cn(
-            "leading-[1.5] text-ash",
+            "leading-[1.5] text-pretty text-ash",
             large ? "max-w-[640px] text-[18px]" : "max-w-[620px] text-[17px]",
           )}
         >

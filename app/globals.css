@@ -40,6 +40,22 @@
   /* Versión quieta para movimiento reducido: la misma espera, sin moverse. */
   --animate-counter-in-still: reveal 1ms linear 1.2s both;
 
+  /* Movimientos de la landing. También van siempre con motion-safe:. */
+  /* Brasa que sube y se apaga. Cada brasa pone su duración, su retraso y
+     las variables --ember-rise (cuánto sube) y --ember-drift (cuánto se
+     ladea) en su style, para que no suban todas a la vez ni igual. */
+  --animate-ember-rise: ember-rise 9s linear infinite;
+  /* Brillo de llama que va y viene detrás de "Conquista.". */
+  --animate-flame-glow: flame-glow 2.8s ease-in-out infinite alternate;
+  /* La línea de "Cómo funciona" se rellena y una brasa la recorre. Las dos
+     leen --line-from y --travel, que cambian con el ancho (vertical en
+     móvil, horizontal desde lg). both: durante el retraso ya están en el
+     primer fotograma (vacía, brasa apagada). */
+  --animate-line-fill: line-fill 0.7s ease-in-out both;
+  --animate-ember-travel: ember-travel 0.7s ease-in-out both;
+  /* Resplandor de la llamada final: crece y se aviva despacio. */
+  --animate-glow-breathe: glow-breathe 5s ease-in-out infinite alternate;
+
   @keyframes drift {
     to {
       transform: scale(1.04);
@@ -148,7 +164,80 @@
       transform: translateY(0);
     }
   }
+
+  /* Solo transform y opacity: el navegador los anima en la tarjeta gráfica
+     sin volver a calcular la página ni repintarla. */
+  @keyframes ember-rise {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    12% {
+      opacity: 1;
+    }
+    50% {
+      transform: translate3d(var(--ember-drift, 12px), calc(var(--ember-rise, -360px) / 2), 0)
+        scale(0.8);
+    }
+    100% {
+      opacity: 0;
+      transform: translate3d(0, var(--ember-rise, -360px), 0) scale(0.4);
+    }
+  }
+
+  @keyframes flame-glow {
+    from {
+      text-shadow: 0 0 14px color-mix(in oklab, var(--color-ember) 30%, transparent);
+    }
+    to {
+      text-shadow:
+        0 0 28px color-mix(in oklab, var(--color-ember) 60%, transparent),
+        0 0 6px color-mix(in oklab, var(--color-gold-bright) 45%, transparent);
+    }
+  }
+
+  @keyframes line-fill {
+    from {
+      scale: var(--line-from);
+    }
+    to {
+      scale: 1;
+    }
+  }
+
+  @keyframes ember-travel {
+    0% {
+      opacity: 0;
+      translate: 0 0;
+    }
+    10%,
+    90% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      translate: var(--travel);
+    }
+  }
+
+  @keyframes glow-breathe {
+    from {
+      opacity: 0.7;
+      scale: 0.94;
+    }
+    to {
+      opacity: 1;
+      scale: 1.06;
+    }
+  }
 }
+
+/* "Pausar animaciones" de la landing: HeroVideo pone data-motion="paused" en
+   <html> y todo lo que lleve motion-paused: se aplica. Se usa con
+   [animation-play-state:paused]! — con ! (important), porque una clase sin
+   él pierde ante el atajo animation de las clases animate-*, que ya dice
+   "running". :where() no suma especificidad. */
+@custom-variant motion-paused (&:where([data-motion="paused"] *));
 
 /* next/font define estas variables en <html> (app/layout.tsx). Con "inline"
    la clase usa la variable tal cual en vez de copiar su valor aquí. */

@@ -1,53 +1,64 @@
 "use client";
 
-import { useCallback, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { setAnimationsPaused, useAnimationsPaused } from "@/components/landing/motion";
 
-// "sin-fuente": el navegador no eligió ninguna <source> (movimiento reducido).
-type Estado = "sin-fuente" | "reproduciendo" | "pausado";
-
-// loadstart avisa de que el navegador eligió una fuente; play y pause, de que
-// cambió video.paused (también si el autoplay arranca tarde o no arranca).
-const EVENTOS = ["loadstart", "play", "pause"] as const;
-
-function leerEstado(video: HTMLVideoElement | null): Estado {
-  if (!video || video.currentSrc === "") return "sin-fuente";
-  return video.paused ? "pausado" : "reproduciendo";
+// ¿Eligió el navegador alguna <source>? No, con movimiento reducido: ninguna
+// coincide con su media, no se descarga el MP4 y queda el poster. loadstart
+// avisa de que eligió una.
+function tieneFuente(video: HTMLVideoElement | null): boolean {
+  return video !== null && video.currentSrc !== "";
 }
 
 // Demo del hero: arranca sola, en silencio y en bucle. Con movimiento reducido
-// ninguna <source> coincide, no se descarga el MP4 y queda el poster. El botón
-// del pie permite pausarla (WCAG 2.2.2) o arrancarla si el navegador bloqueó
-// el autoplay (iPhone en modo de bajo consumo).
+// ninguna <source> coincide, no se descarga el MP4 y queda el poster.
+//
+// El botón del pie es "Pausar animaciones" / "Reanudar animaciones" (WCAG
+// 2.2.2): para TODO lo que se mueve solo en la landing, no solo el video.
+//   - el video, con pause() / play();
+//   - las brasas, el brillo de "Conquista." y el resplandor final (solo CSS),
+//     con data-motion="paused" en <html> y la variante motion-paused:;
+//   - el reloj de la vigilia, que lee el mismo valor (useAnimationsPaused).
+// Con movimiento reducido no hay botón: no hay nada que se mueva.
 export function HeroVideo() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const paused = useAnimationsPaused();
 
   const subscribe = useCallback((onChange: () => void) => {
     const video = videoRef.current;
     if (!video) return () => {};
-    for (const evento of EVENTOS) video.addEventListener(evento, onChange);
-    return () => {
-      for (const evento of EVENTOS) video.removeEventListener(evento, onChange);
-    };
+    video.addEventListener("loadstart", onChange);
+    return () => video.removeEventListener("loadstart", onChange);
   }, []);
 
-  // El estado se lee del propio <video>, así el botón dice lo que pasa de
-  // verdad. En el servidor no hay video: se pinta sin botón.
-  const estado = useSyncExternalStore(
+  // En el servidor no hay video: se pinta sin botón.
+  const conFuente = useSyncExternalStore(
     subscribe,
-    () => leerEstado(videoRef.current),
-    (): Estado => "sin-fuente",
+    () => tieneFuente(videoRef.current),
+    () => false,
   );
 
-  function alternar() {
+  // El atributo de <html> que para las animaciones de CSS. Al salir de la
+  // landing se quita, para no dejar nada en las otras páginas.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (paused) root.dataset.motion = "paused";
+    else delete root.dataset.motion;
+    return () => {
+      delete root.dataset.motion;
+    };
+  }, [paused]);
+
+  // El video sigue a la preferencia. Si el navegador bloqueó el autoplay
+  // (iPhone en modo de bajo consumo), play() rechaza y el video queda en el
+  // poster: "Pausar" y luego "Reanudar" lo arranca, porque ese play() sí
+  // viene de un toque del usuario.
+  useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      // Si el navegador lo impide, play() rechaza y el botón sigue en "Reproducir".
-      video.play().catch(() => {});
-    } else {
-      video.pause();
-    }
-  }
+    if (!video || !conFuente) return;
+    if (paused) video.pause();
+    else video.play().catch(() => {});
+  }, [paused, conFuente]);
 
   return (
     <figure className="flex w-full max-w-[900px] flex-col gap-3">
@@ -71,15 +82,15 @@ export function HeroVideo() {
       </video>
       <figcaption className="text-center text-xs text-smoke">
         Animación conceptual
-        {estado !== "sin-fuente" && (
+        {conFuente && (
           <>
             {" · "}
             <button
               type="button"
-              onClick={alternar}
+              onClick={() => setAnimationsPaused(!paused)}
               className="cursor-pointer rounded-sm underline underline-offset-2 transition-colors hover:text-ash focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright"
             >
-              {estado === "reproduciendo" ? "Pausar" : "Reproducir"}
+              {paused ? "Reanudar animaciones" : "Pausar animaciones"}
             </button>
           </>
         )}
