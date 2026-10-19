@@ -23,6 +23,7 @@ import { AvisoEscriba, EscribaProvider } from "./escriba-context";
 import { EscribaForm } from "./escriba-form";
 import { BloquePregunta } from "./pregunta-form";
 import { PuntosDebiles } from "./puntos-debiles";
+import { RenombrarMateria } from "./renombrar-form";
 
 // Tiempo máximo de esta página y de TODAS sus Server Actions en Vercel (ver
 // node_modules/next/dist/docs/.../route-segment-config/maxDuration.md). El
@@ -219,6 +220,7 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
               abiertoInicial={questions.length === 0 || edicion !== null}
               topics={topics}
             />
+            <RenombrarMateria subjectId={subject.id} name={subject.name} />
           </div>
 
           <div className="flex min-w-0 flex-col gap-7 xl:col-start-1 xl:row-start-1">
@@ -226,7 +228,7 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
             {questions.length > 0 && <PuntosDebiles data={weak} />}
 
             <section aria-labelledby="banco" className="flex min-w-0 flex-col gap-3">
-              <Eyebrow id="banco">Banco de preguntas · {formatNumber(questions.length)}</Eyebrow>
+              <Eyebrow as="h2" id="banco">Banco de preguntas · {formatNumber(questions.length)}</Eyebrow>
               <AvisoEscriba />
 
               {questions.length === 0 ? (

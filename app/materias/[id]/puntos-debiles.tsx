@@ -13,7 +13,7 @@ import { formatNumber } from "@/lib/text";
 export function PuntosDebiles({ data }: { data: WeakPoints }) {
   return (
     <section aria-labelledby="puntos-debiles" className={cn(cardStyles, "@container flex flex-col gap-4 p-5 md:p-6")}>
-      <Eyebrow id="puntos-debiles" className="tracking-[2px]">
+      <Eyebrow as="h2" id="puntos-debiles" className="tracking-[2px]">
         Puntos débiles
       </Eyebrow>
 

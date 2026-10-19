@@ -232,8 +232,10 @@
   }
 }
 
-/* "Pausar animaciones" de la landing: HeroVideo pone data-motion="paused" en
-   <html> y todo lo que lleve motion-paused: se aplica. Se usa con
+/* "Pausar animaciones" de la landing: data-motion="paused" en <html> (lo pone
+   el script del <head> antes del primer pintado, ver
+   components/landing/motion-script.ts) y todo lo que lleve motion-paused: se
+   aplica. Se usa con
    [animation-play-state:paused]! — con ! (important), porque una clase sin
    él pierde ante el atajo animation de las clases animate-*, que ya dice
    "running". :where() no suma especificidad. */

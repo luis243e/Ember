@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Cinzel, Cinzel_Decorative, Inter } from "next/font/google";
+import { MOTION_SCRIPT } from "@/components/landing/motion-script";
 import "./globals.css";
 
 // Texto general. Es variable: trae todos los pesos en un solo archivo.
@@ -29,10 +30,21 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
+    // suppressHydrationWarning: el script del <head> puede añadir
+    // data-motion="paused" a <html> antes de que React hidrate; así React
+    // acepta ese atributo en vez de tratarlo como un error. Solo afecta a los
+    // atributos de <html>, no a lo que va dentro.
     <html
       lang="es"
       className={`${inter.variable} ${cinzel.variable} ${cinzelDecorative.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        {/* "Pausar animaciones" de la landing antes del primer pintado: ver
+            components/landing/motion-script.ts. Es texto fijo (no depende de
+            la petición), así que la landing sigue siendo estática. */}
+        <script dangerouslySetInnerHTML={{ __html: MOTION_SCRIPT }} />
+      </head>
       <body className="flex min-h-full flex-col bg-night text-parchment">{children}</body>
     </html>
   );

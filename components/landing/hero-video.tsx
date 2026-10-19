@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
-import { setAnimationsPaused, useAnimationsPaused } from "@/components/landing/motion";
+import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { readAnimationsPaused, setAnimationsPaused, useAnimationsPaused } from "@/components/landing/motion";
+import { applyMotionAttribute } from "@/components/landing/motion-script";
 
 // ¿Eligió el navegador alguna <source>? No, con movimiento reducido: ninguna
 // coincide con su media, no se descarga el MP4 y queda el poster. loadstart
@@ -38,33 +39,47 @@ export function HeroVideo() {
     () => false,
   );
 
-  // El atributo de <html> que para las animaciones de CSS. Al salir de la
-  // landing se quita, para no dejar nada en las otras páginas.
-  useEffect(() => {
-    const root = document.documentElement;
-    if (paused) root.dataset.motion = "paused";
-    else delete root.dataset.motion;
-    return () => {
-      delete root.dataset.motion;
-    };
-  }, [paused]);
+  // El atributo de <html> que para las animaciones de CSS. En una carga
+  // normal ya lo puso el script del <head> (motion-script.ts) y al pulsar el
+  // botón lo pone setAnimationsPaused(). Aquí solo se pone al llegar a la
+  // landing por una navegación en el cliente (el script del <head> no vuelve
+  // a correr) o tras el remontaje de Strict Mode en desarrollo, que lo borra.
+  // useLayoutEffect: antes de pintar. Se lee readAnimationsPaused() y no
+  // `paused`, que al hidratar todavía es el false del servidor. Al salir de
+  // la landing se quita, para no dejar nada en las otras páginas.
+  useLayoutEffect(() => {
+    applyMotionAttribute(readAnimationsPaused());
+    return () => applyMotionAttribute(false);
+  }, []);
 
-  // El video sigue a la preferencia. Si el navegador bloqueó el autoplay
-  // (iPhone en modo de bajo consumo), play() rechaza y el video queda en el
-  // poster: "Pausar" y luego "Reanudar" lo arranca, porque ese play() sí
-  // viene de un toque del usuario.
+  // El video sigue a la preferencia. Sin autoPlay (ver el <video>): lo
+  // arranca este play() solo si no está pausado. muted como propiedad, por si
+  // acaso: Safari en iOS solo deja llamar a play() sin un toque si el video
+  // está en silencio (y playsInline). Si el navegador lo bloquea (iPhone en
+  // modo de bajo consumo), play() rechaza, el catch vacío evita el error en
+  // la consola y queda el poster: "Pausar" y luego "Reanudar" lo arranca,
+  // porque ese play() sí viene de un toque del usuario.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !conFuente) return;
-    if (paused) video.pause();
-    else video.play().catch(() => {});
+    if (paused) {
+      video.pause();
+      return;
+    }
+    video.muted = true;
+    video.play().catch(() => {});
   }, [paused, conFuente]);
 
   return (
     <figure className="flex w-full max-w-[900px] flex-col gap-3">
+      {/* Sin autoPlay: con él, el video arrancaba en cuanto el navegador
+          leía el HTML, antes de que el JavaScript supiera que el visitante lo
+          había pausado. Ahora lo arranca el efecto de arriba. Sin JavaScript
+          (o hasta que llega), se ve el poster. preload="auto": que vaya
+          bajando mientras tanto, para que arranque enseguida. */}
       <video
         ref={videoRef}
-        autoPlay
+        preload="auto"
         muted
         loop
         playsInline

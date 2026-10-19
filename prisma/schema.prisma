@@ -382,10 +382,16 @@ model Subject {
   // Veces que se invocó al escriba con apuntes de esta materia.
   agentInvocations AgentInvocation[]
 
-  // @@index (doble @ = afecta a toda la tabla) crea un índice sobre userId.
-  // Un índice es como el índice de un libro: hace muy rápido buscar
-  // "todas las materias del usuario X". Postgres no lo crea solo.
-  @@index([userId])
+  // Sin @@index: el índice lo pone la migración 20261019210000_materia_unica,
+  // escrito a mano porque Prisma no sabe declarar índices de expresión:
+  //   UNIQUE ("userId", lower(btrim(name)))  → "Subject_userId_name_ci_key"
+  // Un usuario no puede tener dos materias con el mismo nombre sin contar
+  // mayúsculas ni espacios de los extremos ("Cálculo" y " cálculo " chocan;
+  // "Cálculo" y "Calculo", sin tilde, no). Como empieza por userId, también
+  // hace rápido "todas las materias del usuario X", así que sustituye al
+  // @@index([userId]) que había. Prisma no lo ve ni intenta borrarlo
+  // (comprobado con migrate diff). Los choques se capturan en
+  // app/materias/actions.ts (P2002 / 23505).
 }
 
 
@@ -667,10 +673,10 @@ model Question {
   // Veces que ha salido en un contraataque.
   attempts     QuestionAttempt[]
 
-  // @@index([subjectId]) queda redundante con el segundo (empieza por
-  // subjectId), pero la migración del repaso es solo aditiva: ver pendientes.
-  @@index([subjectId])
-  // Las que tocan de una materia, por fecha.
+  // Las que tocan de una materia, por fecha. Como empieza por subjectId,
+  // sirve también para "todas las preguntas de la materia X" (y para el
+  // borrado en cascada): el @@index([subjectId]) que había era redundante y
+  // lo quitó 20261019210000_materia_unica.
   @@index([subjectId, reviewDueAt])
 }
 

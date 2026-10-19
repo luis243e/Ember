@@ -12,10 +12,12 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
 - **Base de datos:** 17 tablas (ver [Modelo de datos](#modelo-de-datos)),
-  creadas con 17 migraciones (la 14.ª, `20261012183227_repaso`, la 15.ª,
-  `20261014194417_brasa`, la 16.ª, `20261018235832_fase3`, y la 17.ª,
-  `20261019120000_fase4`, solo en la base local; la 12.ª y la 13.ª ya están
-  en `main`, commits `6026efc` y `53e2712`).
+  creadas con 18 migraciones. Hasta la 17.ª, `20261019120000_fase4`, están en
+  `origin/main` (la 14.ª, `repaso`, en `4ed523f`; la 15.ª, `brasa`, en
+  `9d9ed5e`; la 16.ª, `fase3`, en `b2a302f`; la 17.ª en `80722aa`) y las
+  aplica el build de Vercel al desplegar (no comprobado en el log en estas
+  sesiones). La 18.ª, `20261019210000_materia_unica`, solo en la base local
+  (sin commit).
   RLS activado en todas, y en producción también en `_prisma_migrations` (a
   mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
@@ -28,8 +30,14 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261019120000_fase4` (19 oct, sin commit;
-  solo en la base local): columnas nuevas en `User` (`bestFlame`,
+- **Migraciones:** la última es `20261019210000_materia_unica` (19 oct, sin
+  commit; solo en la base local), escrita a mano: si un usuario tuviera dos
+  materias con el mismo nombre (sin contar mayúsculas ni espacios de los
+  extremos), se para con un mensaje claro sin tocar nada; si no, crea el
+  índice único de expresión `"Subject_userId_name_ci_key"` sobre
+  `("userId", lower(btrim(name)))` y borra dos índices redundantes,
+  `Subject_userId_idx` y `Question_subjectId_idx`. Ningún dato cambia. La
+  anterior, `20261019120000_fase4` (19 oct, commit `80722aa`): columnas nuevas en `User` (`bestFlame`,
   `equippedRelic`, `friendCode` único, `showStats`, `friendRequestDay`,
   `friendRequestCount`), `RedemptionTrial.passWith` (por defecto 4) y
   `Counterattack.bonusPerCorrect` (por defecto 0); los enums `BlessingKey` y
@@ -38,17 +46,17 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de compañeros (`LEAST`/`GREATEST`) y cuatro rellenos (códigos de amigo,
   racha más larga como cota inferior, reliquias de los jefes ya vencidos e
   hitos de llama). Solo añade cosas. Se creó con `migrate diff` (ver la
-  sesión). La anterior, `20261018235832_fase3` (18 oct, sin commit; solo en
-  la base local): crea el enum `RedemptionRule`, añade `REINFORCE` a
+  sesión). La anterior, `20261018235832_fase3` (18 oct, commit `b2a302f`):
+  crea el enum `RedemptionRule`, añade `REINFORCE` a
   `AgentInputKind`, `Question.topic` (opcional), `RedemptionMission.rule` (por
   defecto `LEGACY`: las misiones que ya existen siguen con 2 vigilias) y
   `RedemptionMission.trialsUsed` (por defecto 0), y crea `RedemptionTrial`
   (con RLS). A mano: un índice único parcial (una prueba abierta por misión) y
   un `CHECK` (`trialsUsed` entre 0 y `vigilsDone`). Solo añade cosas. La
-  anterior, `20261014194417_brasa` (14 oct, sin commit; solo en la base local): añade `User.embers` (por defecto 0, con un `CHECK`
+  anterior, `20261014194417_brasa` (14 oct, commit `9d9ed5e`): añade `User.embers` (por defecto 0, con un `CHECK`
   a mano de 0 a 2) y `Counterattack.bossDifficulty` (opcional; `null` en los
   contraataques de antes). Solo añade cosas. La anterior,
-  `20261012183227_repaso` (12 oct, sin commit; solo en la base local): añade `Question.reviewLevel` (por defecto 0, con un
+  `20261012183227_repaso` (12 oct, commit `4ed523f`): añade `Question.reviewLevel` (por defecto 0, con un
   `CHECK` a mano de 0 a 5) y `Question.reviewDueAt` (opcional), un índice
   `(subjectId, reviewDueAt)` y **rellena** las preguntas que ya existían a
   partir de su último intento. Solo añade cosas. La anterior,
@@ -78,7 +86,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   Google (`/registro`, `/login`), página protegida `/mazmorra` y cierre de sesión.
   En producción se probaron el registro, el login y la redirección de
   `/mazmorra` sin sesión a `/login` (6 oct).
-- **Verificación de correo (10 oct, sin commit):** registrarse envía un
+- **Verificación de correo (10 oct, ya en `main`):** registrarse envía un
   correo con un enlace de 1 hora (Gmail por SMTP con nodemailer, todo en
   `sendEmail()` de `lib/email.ts`); sin verificar no se entra, y al
   intentarlo llega un enlace nuevo. Abrir el enlace verifica, abre la sesión
@@ -89,7 +97,26 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis. `GMAIL_USER` y `GMAIL_APP_PASSWORD` ya están en Vercel
   (*Production*). Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
-- **Fase 4 completa (19 oct, sin commit): perfil, Google, recompensas y
+- **Pulido 2 (19 oct, sin commit):**
+  - **Materias con nombre único por usuario**, sin contar mayúsculas ni
+    espacios de los extremos (las tildes sí cuentan: «Calculo» ≠ «Cálculo»).
+    Lo impone un índice de expresión en la base; crear y el nuevo
+    **renombrar** (plegado al final de la columna derecha de
+    `/materias/[id]`) responden «Ya tienes una materia con ese nombre», nunca
+    un 500 (`lib/subjects.ts`).
+  - **Video del hero** con «Asestar golpe» y la interfaz actual de la batalla
+    (misma ilustración, 731 KB), regenerable con `scripts/video-hero.mjs`.
+  - **«Pausar animaciones» sin parpadeo**: un script en línea en el `<head>`
+    pone `data-motion="paused"` antes del primer pintado, y el video ya no
+    lleva `autoPlay` (lo arranca `play()` si no está pausado; si el navegador
+    lo bloquea, queda el póster).
+  - **Auditoría en Chrome, Firefox y WebKit** a 1280 y 320 px, con el árbol
+    de accesibilidad y el teclado (`scripts/auditar-navegadores.mjs`); arreglado
+    un salto de encabezados en `/materias/[id]`.
+  - Probado en local (`probar-materias`, `probar-pausa-landing`, la
+    auditoría, todos los anteriores, `tsc`, `eslint`, `next build`). Detalles en
+    [2026-10-19-pulido-2.md](sesiones/2026-10-19-pulido-2.md).
+- **Fase 4 completa (19 oct, ya en `main`): perfil, Google, recompensas y
   compañeros.**
   - **Perfil (`/perfil`)**: nombre de vigilante (2–40), cambiar la contraseña
     (o crearla si solo entras con Google) cerrando las demás sesiones, tus
@@ -113,7 +140,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
     `probar-recompensas` y `probar-companeros`, todos los anteriores, `tsc`,
     `eslint`, `next build`, Chrome y 320 px). Detalles en
     [2026-10-19-fase-4-perfil-google-recompensas-companeros.md](sesiones/2026-10-19-fase-4-perfil-google-recompensas-companeros.md).
-- **Fase 3 completa (18 oct, sin commit): el agente más a fondo.**
+- **Fase 3 completa (18 oct, ya en `main`): el agente más a fondo.**
   - **Temas y puntos débiles:** cada pregunta puede tener un tema (hasta 60
     caracteres; el escriba lo propone reutilizando los de la materia, o se
     escribe a mano con sugerencias). En `/materias/[id]`, encima del banco, el
@@ -142,7 +169,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
     [2026-10-18-fase-3-el-agente.md](sesiones/2026-10-18-fase-3-el-agente.md).
 - **Fase 2 completa (14 oct).** Banco de preguntas, contraataque, escriba,
   preguntas que vuelven y brasa.
-- **Pulido antes de la Fase 3 (14 oct, sin commit):** «¿Olvidaste tu
+- **Pulido antes de la Fase 3 (14 oct, ya en `main`):** «¿Olvidaste tu
   contraseña?» en `/login` → `/olvide-contrasena` (siempre la misma
   respuesta; correo en segundo plano y con el límite por cuenta) →
   enlace de un solo uso de 1 h → `/restablecer-contrasena`. Al guardar se
@@ -153,7 +180,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   batalla, la mazmorra vacía, la fecha a 320 px y el golpe tardío
   (`lateFall`). Sin migraciones ni dependencias. Detalles en
   [2026-10-14-pulido-antes-de-fase-3.md](sesiones/2026-10-14-pulido-antes-de-fase-3.md).
-- **Fase 2 · paso 5: la brasa (14 oct, sin commit):** un comodín que salva la
+- **Fase 2 · paso 5: la brasa (14 oct, ya en `main`):** un comodín que salva la
   llama. Se gana al terminar un contraataque perfecto (todas del banco, sin
   genéricas, y todas acertadas) contra un jefe medio o difícil; máximo 2
   (`EMBER` y `emberForCounterattack()` en `lib/game.ts`). Se gasta sola al
@@ -167,7 +194,7 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   el mismo cálculo (`flameOutlook()`). Probado en local (script
   `probar-brasa` y Chrome, también a 320 px). Detalles en
   [2026-10-14-la-brasa.md](sesiones/2026-10-14-la-brasa.md).
-- **Fase 2 · paso 4: las preguntas que vuelven (12 oct, sin commit):**
+- **Fase 2 · paso 4: las preguntas que vuelven (12 oct, ya en `main`):**
   repetición espaciada tipo Leitner. Cada pregunta del banco tiene un nivel
   de 0 a 5 y una fecha en la que vuelve (`REVIEW` y `nextReview()` en
   `lib/game.ts`). Fallar o esquivar → nivel 0 y vuelve en el próximo
@@ -291,8 +318,9 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
 - **Video del hero (en producción desde la noche del 6 oct):** demo de 10 s
   en bucle, sin sonido, con botón Pausar/Reproducir en el pie
   (`components/landing/hero-video.tsx`). Con `prefers-reduced-motion` solo se
-  ve el poster.
-- **Landing de la Fase 2 (17 oct, sin commit):** título "Estudia. Golpea.
+  ve el poster. Desde el pulido 2 (sin commit) muestra «Asestar golpe» y la
+  interfaz actual, y lo arranca `play()` (sin `autoPlay`).
+- **Landing de la Fase 2 (17 oct, ya en `main`):** título "Estudia. Golpea.
   Conquista.", textos auditados para que sean ciertos hoy, cabecera fija con
   desenfoque, jefes tenues y brasas en el hero, cuatro pasos unidos por una
   línea que recorre una brasa, bestiario con ilustraciones (barra de 400 a
@@ -330,7 +358,7 @@ migraciones, y el schema lo avisa con un comentario.
 | Tabla | Qué guarda | Relaciones |
 |---|---|---|
 | `User` | Usuario y su personaje: nivel, almas, llama, brasas (`embers`, 0–2, con un `CHECK` a mano), racha más larga (`bestFlame`), título equipado (`equippedRelic`), código de amigo (`friendCode`, único, con `CHECK` de formato), `showStats`, límite de correos y de solicitudes de compañero (`friendRequestDay`, `friendRequestCount`) | Tiene materias, vigilias, misiones, pruebas de redención, intentos, contraataques, invocaciones del escriba, bendiciones, ofertas, reliquias, compañeros, sesiones y cuentas |
-| `Subject` | Materia ("Cálculo") | De un `User`. Tiene jefes (`Task`) y preguntas (`Question`) |
+| `Subject` | Materia ("Cálculo") | De un `User`. Tiene jefes (`Task`) y preguntas (`Question`). Índice único de expresión a mano, `("userId", lower(btrim(name)))`: un nombre por usuario sin contar mayúsculas ni espacios de los extremos |
 | `Task` | Jefe: vida, dificultad, fecha de entrega, estado, `bossKey` | De una `Subject` (no tiene `userId`: se filtra por la materia) |
 | `StudySession` | Vigilia de 25 min y sus almas | De una `Task` y de un `User`. Una sola abierta por usuario (índice parcial) |
 | `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo, `rule` (`LEGACY` / `FEW_QUESTIONS` / `TRIAL`, fijada al caer), `vigilsDone` y `trialsUsed` (intentos = `vigilsDone − trialsUsed`) | De un `User` y una `Task` (la materia de la prueba es la de la tarea). Una sola `ACTIVE` por usuario (índice parcial). `CHECK` a mano: `trialsUsed` entre 0 y `vigilsDone` |
@@ -382,7 +410,7 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
 5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
    equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
    descarga la imagen. `docker compose ps` debe decir `healthy`.
-6. `npx prisma migrate deploy` crea las tablas aplicando las 17 migraciones.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 18 migraciones.
 7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
    `prueba1234`** (de desarrollo, no protege nada real) con 2 materias (10
    preguntas con tema y 25 respuestas en Cálculo, para ver los Puntos débiles;
@@ -406,8 +434,9 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
    (con `EMBER_FAKE_AGENT=1`), `scripts/probar-google.ts` (con `--accion`, el
    servidor tiene que tener las variables de Google, aunque sean de mentira),
    `scripts/probar-recompensas.ts` y `scripts/probar-companeros.ts` (los dos
-   con `--payload`). `probar-preguntas` usa la cuenta del seed: si falla
-   después de otros scripts, `npm run db:seed` y otra vez.
+   con `--payload`). Las materias (nombre único y renombrar):
+   `scripts/probar-materias.ts`. `probar-preguntas` usa la cuenta del seed:
+   si falla después de otros scripts, `npm run db:seed` y otra vez.
 8. `npm run dev` y abrir http://localhost:3000/login. Si con las variables de
    Gmail rellenas sale "unable to verify the first certificate", es un
    antivirus que intercepta el correo (en el portátil de Luis, Norton):
@@ -416,6 +445,58 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
 Para empezar de cero: `docker compose down -v` (borra el volumen con los
 datos), `docker compose up -d`, `npx prisma migrate deploy` y
 `npm run db:seed`.
+
+### Herramientas opcionales: video y navegadores
+
+No están en `package.json`: son programas del equipo, fuera del repositorio.
+
+- **ffmpeg**, para regenerar el video del hero con `scripts/video-hero.mjs`:
+  `winget install --id Gyan.FFmpeg -e --source winget` (con
+  `--source winget`: sin él, winget falla en este equipo al buscar en la
+  tienda de Microsoft) y abrir una terminal nueva para que esté en el PATH (o
+  pasar la ruta en `FFMPEG`). Con `npm run dev` encendido:
+  `node scripts/video-hero.mjs` deja el resultado en `capturas/video-hero/`
+  para revisarlo y `--publicar` lo copia a `public/landing/`. Parte siempre
+  del video original guardado en git (`c3c9c03`).
+- **Playwright** con Firefox y WebKit, en `%LOCALAPPDATA%\ember-playwright`
+  (instrucciones en `scripts/playwright-externo.mjs`). Chrome es el
+  instalado, siempre con un perfil temporal nuevo, y solo se abre
+  `localhost:3000`. Lo usan:
+  - `node scripts/probar-pausa-landing.mjs`: «Pausar animaciones» con red
+    lenta y sin caché (mejor con `next build` + `next start`);
+  - `node scripts/auditar-navegadores.mjs --preparar` (una vez, con
+    `npm run dev`: deja un contraataque a medias con la cuenta del seed) y
+    después, con `next build` + `next start`,
+    `node scripts/auditar-navegadores.mjs`: las 8 pantallas a 1280 y 320 px
+    en los tres motores (scroll horizontal, errores, nombres accesibles, un
+    `h1`, orden de encabezados, Tab y foco visible). Informe en
+    `capturas/auditoria/informe.json`.
+- **WebKit en Windows se parece a Safari, pero no es Safari.** Comparte el
+  motor, no la integración con el sistema (fuentes, códecs, modo de bajo
+  consumo, iOS). Por ejemplo, ahí Inter y Cinzel salen sin negrita y Tab no
+  pasa por los enlaces (como Safari por defecto). Lo que importe de Safari
+  hay que verlo en un Mac o un iPhone.
+
+### Con el Narrador de Windows (lo que la auditoría no ve)
+
+La auditoría automática comprueba nombres, encabezados y foco, pero no cómo
+**suena** la app. Con el Narrador (`Ctrl + Win + Enter`) y Chrome:
+
+1. **Landing:** con `H` (siguiente encabezado), que se oigan los títulos en
+   orden; que el video se anuncie con su descripción y que «Pausar
+   animaciones» diga su estado al pulsarlo.
+2. **Registro y login:** cada campo con su etiqueta; un error (contraseña
+   corta, correo repetido) se anuncia solo, sin buscarlo; el ojo de la
+   contraseña dice si la muestra o la oculta.
+3. **Mazmorra:** cada jefe se entiende por su enlace («Atacar a…») y su vida.
+4. **Batalla:** «Vigilia cumplida. Ya puedes asestar el golpe.» se anuncia
+   sola; en el contraataque, el diálogo dice su título y «Pregunta N de M»,
+   cada opción se lee con su letra, y el acierto o el fallo se anuncia.
+5. **Materias:** crear una repetida → se oye «Ya tienes una materia con ese
+   nombre»; renombrar → «Nombre guardado.».
+6. **Perfil y compañeros:** los interruptores y radios dicen su estado
+   (marcado o no); borrar la cuenta explica qué hay que escribir.
+7. En todas: `Tab` recorre en un orden lógico y nada queda atrapado.
 
 ## Reglas del proyecto
 
@@ -493,6 +574,26 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   los borra). Se avisa con un comentario en el modelo y en el SQL. Ojo: Prisma
   crea `String[]` sin `NOT NULL`, y un `CHECK` con resultado `NULL` pasa;
   hay que escribir `IS NOT NULL`.
+- **Los índices de expresión también van a mano** (como
+  `Subject_userId_name_ci_key`). Antes de dar por buena la migración,
+  `migrate diff` en las dos direcciones (migraciones → schema y base →
+  schema) tiene que dar «No difference detected»: así se sabe que Prisma no
+  intentará recrear ni borrar nada. Prisma traduce sus choques a `P2002`.
+- **Una migración que no puede seguir se para con un mensaje, sin arreglar
+  datos sola.** Un bloque `DO $$ … RAISE EXCEPTION … USING HINT` al principio
+  que diga cuántos casos hay y cómo encontrarlos, sin mostrar datos de los
+  usuarios. Nada de borrar o renombrar automáticamente.
+- **La unicidad la impone la base, no una comprobación previa en el
+  código** (que tiene carreras): se intenta y el choque se convierte en un
+  mensaje amable.
+- **Playwright y ffmpeg, fuera del repositorio** (ver
+  [Herramientas opcionales](#herramientas-opcionales-video-y-navegadores)).
+  Chrome siempre con `launch()` y un perfil temporal nuevo (nunca
+  `launchPersistentContext` ni el perfil de Luis), y solo `localhost:3000`.
+- **Las preferencias guardadas que cambian lo que se ve al cargar se aplican
+  antes del primer pintado** con un script en línea, mínimo y con `try/catch`,
+  en el `<head>` (ver `components/landing/motion-script.ts`), no en un
+  `useEffect`.
 - **Los scripts en TypeScript se ejecutan con `node`, sin dependencias**
   (Node 24 entiende TypeScript): `node --env-file=.env --import ./scripts/alias-hooks.mjs <script>.ts`.
   `alias-hooks.mjs` traduce `@/` como `tsconfig.json`, para reutilizar
@@ -990,7 +1091,21 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 
 ## Pendientes
 
-- [ ] **Desplegar `20261019120000_fase4`** (solo aditiva) y crear en Vercel
+- [ ] **Después del push del pulido 2:** mirar en el log del build de Vercel
+  que se aplica `20261019210000_materia_unica` (si hubiera materias
+  repetidas, el build fallaría con el mensaje y la consulta para
+  encontrarlas) y probar en producción crear y renombrar.
+- [ ] **Narrador de Windows:** la lista de
+  [Con el Narrador de Windows](#con-el-narrador-de-windows-lo-que-la-auditoría-no-ve).
+- [ ] **Safari de verdad y un iPhone:** el video sin `autoPlay` (también en
+  bajo consumo), «Pausar animaciones» y **la negrita** (en el WebKit de
+  Windows, Inter y Cinzel salen sin negrita aunque el peso calculado es 700;
+  en Chrome y Firefox, bien: probablemente del WebKit de Windows).
+- [ ] Si algún día «Calculo» y «Cálculo» deben chocar: `unaccent` en el índice
+  (hoy son distintas a propósito).
+
+- [ ] **`20261019120000_fase4`** ya está en `origin/main` (`80722aa`):
+  comprobar en el log del build que se aplicó. Crear en Vercel
   (*Production*) `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`, con la URI de
   redirección de producción añadida en Google Cloud (y la pantalla de
   consentimiento publicada, o solo entrarán los usuarios de prueba). Después,
@@ -1005,7 +1120,9 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Compañeros: no hay bloqueo de usuarios ni tope de solicitudes recibidas.
 - [ ] `probar-preguntas` depende de la cuenta del seed (otros scripts le dejan
   preguntas del escriba). Hacer que cree sus propios datos.
-- [ ] Fase 4: lector de pantalla real, Safari y Firefox.
+- [ ] Fase 4: lector de pantalla real y Safari. (Firefox, y WebKit como
+  aproximación de Safari, ya con la auditoría automática del pulido 2: sin
+  problemas en perfil y compañeros.)
 
 - [ ] **Elegir y probar un modelo de reserva real** (`GEMINI_MODEL_FALLBACK`):
   solo se probó con el `fetch` falso.
@@ -1022,17 +1139,18 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   `finishedAt` nulo (se ignoran). Cerrarlas si molestan en el historial.
 - [ ] Prueba de redención, refuerzo y Puntos débiles: lector de pantalla real,
   Safari y Firefox, y «Afrontar la prueba» sin JavaScript.
-- [ ] Regenerar el video y el póster del hero con "Asestar golpe" (hoy el
-  botón del video dice "ATACAR").
+- [x] ~~Regenerar el video y el póster del hero con "Asestar golpe"~~ (19 oct,
+  pulido 2): misma ilustración con la interfaz actual encima,
+  `scripts/video-hero.mjs`.
 - [ ] Landing: decidir si se ensanchan el bloque del bestiario y el reloj a
   520 px (como el contraataque) para que quede menos aire entre texto y
   maqueta.
-- [ ] Landing de la Fase 2: probar en Safari, Firefox, un iPhone y con lector
-  de pantalla, y el movimiento reducido a mano en DevTools.
+- [ ] Landing de la Fase 2: probar en Safari, un iPhone y con lector de
+  pantalla. (Firefox, WebKit y el movimiento reducido emulado, ya probados
+  con `auditar-navegadores` y `probar-pausa-landing` en el pulido 2.)
 
-- [ ] Borrar `@@index([subjectId])` de `Question` en una migración futura: el
-  índice `(subjectId, reviewDueAt)` del paso 4 lo cubre. No se borró porque
-  la migración del repaso tenía que ser solo aditiva.
+- [x] ~~Borrar `@@index([subjectId])` de `Question`~~ (19 oct, pulido 2):
+  `20261019210000_materia_unica`, comprobado antes con `EXPLAIN`.
 - [ ] Desplegar `20261012183227_repaso` (y probar el repaso en producción):
   allí el relleno usará los intentos de producción.
 - [ ] Desplegar `20261014194417_brasa` (solo aditiva) y probar la brasa en
@@ -1278,3 +1396,4 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-18 | Modelo de reserva para Gemini (`GEMINI_MODEL_FALLBACK`): 503 o timeout del primer intento (25 s) → segundo modelo dentro de los 45 s; 429 y 4xx no; `AbortController` por intento; 20 comprobaciones nuevas con `fetch` falso | [2026-10-18-modelo-de-reserva-gemini.md](sesiones/2026-10-18-modelo-de-reserva-gemini.md) |
 | 2026-10-19 | Fase 4: perfil (nombre, contraseña, hazañas, borrar la cuenta en cascada con reintento ante `40P01`), Google (OAuth con PKCE, vinculación solo con correos verificados, sin tokens, `disabledPaths`), recompensas (6 bendiciones con oferta fijada en el servidor y pesos exactos, 9 reliquias y títulos, gasto en la transacción que las usa) y compañeros (código con `node:crypto` y relleno SQL sin bits fijos, lápida, límite diario, clasificación semanal de Bogotá, privacidad) | [2026-10-19-fase-4-perfil-google-recompensas-companeros.md](sesiones/2026-10-19-fase-4-perfil-google-recompensas-companeros.md) |
 | 2026-10-17 | Landing de la Fase 2: textos auditados ("Estudia. Golpea. Conquista."), cabecera fija, jefes y brasas en el hero, islas `Reveal` (IntersectionObserver) y `VigilClock`, bestiario, sección El escriba, máscaras de degradado, rejilla de dos columnas, "Pausar animaciones" (`@custom-variant`, `localStorage`), `scripts/capturas-landing.mjs` (CDP) | [2026-10-17-landing-fase-2.md](sesiones/2026-10-17-landing-fase-2.md) |
+| 2026-10-19 | Pulido 2: índice redundante fuera (`EXPLAIN`, prefijo izquierdo), materia única por usuario con índice de expresión `lower(btrim(name))` escrito a mano y comprobado con `migrate diff`, renombrar, video del hero con «Asestar golpe» (CDP + ffmpeg sobre el original de git), script en línea contra el parpadeo (FOUC) y video sin `autoPlay`, auditoría en Chrome/Firefox/WebKit con `ariaSnapshot` y Tab (Playwright fuera del repositorio) | [2026-10-19-pulido-2.md](sesiones/2026-10-19-pulido-2.md) |

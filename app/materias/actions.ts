@@ -1,11 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { createSubject, renameSubject } from "@/lib/subjects";
 import { normalizeName } from "@/lib/text";
-
-const MAX_LONGITUD_NOMBRE = 60;
 
 // name es lo que verá el campo después de enviar: lo escrito si hubo error
 // (para no perderlo) o "" si la materia se creó (para escribir la siguiente).
@@ -18,35 +17,40 @@ export async function crearMateria(
   // El dueño sale SIEMPRE de la sesión, nunca del formulario.
   const user = await requireUser();
 
-  // Lo escrito, tal cual, para devolverlo si hay error.
+  // Lo escrito, tal cual, para devolverlo si hay error. Normalizar, validar
+  // y el nombre repetido (índice único, sin distinguir mayúsculas): ver
+  // lib/subjects.ts.
   const escrito = String(formData.get("name") ?? "");
-  const fallo = (error: string): EstadoMateria => ({ error, name: escrito });
-
-  // "  Cálculo   II " → "Cálculo II" (ver lib/text.ts).
-  const name = normalizeName(escrito);
-
-  // Se valida después de normalizar.
-  if (name === "") return fallo("Escribe un nombre para la materia.");
-  if (name.length > MAX_LONGITUD_NOMBRE) {
-    return fallo(`El nombre no puede pasar de ${MAX_LONGITUD_NOMBRE} caracteres.`);
-  }
-
-  // Duplicados sin distinguir mayúsculas. Se compara aquí y no con
-  // mode: "insensitive", porque Prisma lo traduce a ILIKE y ahí "_" y "%"
-  // funcionan como comodines.
-  const existentes = await prisma.subject.findMany({
-    where: { userId: user.id },
-    select: { name: true },
-  });
-  const nombreNormalizado = name.toLocaleLowerCase("es");
-  const repetida = existentes.some(
-    (materia) => materia.name.toLocaleLowerCase("es") === nombreNormalizado,
-  );
-  if (repetida) return fallo(`Ya tienes una materia llamada "${name}".`);
-
-  await prisma.subject.create({ data: { name, userId: user.id } });
+  const resultado = await createSubject(user.id, escrito);
+  if (!resultado.ok) return { error: resultado.error, name: escrito };
 
   // Vuelve a renderizar /materias para que la lista incluya la nueva.
   revalidatePath("/materias");
   return { error: null, name: "" };
+}
+
+// ok: true justo después de guardar (el formulario lo anuncia). name: lo que
+// mostrará el campo, lo escrito si hubo error o el nombre ya normalizado.
+export type EstadoRenombrar = { error: string | null; ok: boolean; name: string };
+
+export async function renombrarMateria(
+  _estadoAnterior: EstadoRenombrar,
+  formData: FormData,
+): Promise<EstadoRenombrar> {
+  const user = await requireUser();
+  const subjectId = formData.get("subjectId");
+  // Si el id no es un texto o la materia es de otro, notFound(), sin decir
+  // cuál de las dos cosas pasó (como materiaPropia() de [id]/actions.ts).
+  if (typeof subjectId !== "string") notFound();
+
+  const escrito = String(formData.get("name") ?? "");
+  const resultado = await renameSubject(user.id, subjectId, escrito);
+  if (resultado === "not-found") notFound();
+  if (!resultado.ok) return { error: resultado.error, ok: false, name: escrito };
+
+  // La lista y la página de la materia (título y cabecera). La mazmorra y la
+  // batalla son dinámicas: leen el nombre nuevo al entrar.
+  revalidatePath("/materias");
+  revalidatePath(`/materias/${subjectId}`);
+  return { error: null, ok: true, name: normalizeName(escrito) };
 }
