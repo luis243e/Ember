@@ -74,6 +74,20 @@ export function startOfTodayInAppTimeZone(now: Date = new Date()): Date {
   return new Date(todayDateInAppTimeZone(now).getTime() + APP_UTC_OFFSET_MS);
 }
 
+// La SEMANA de la clasificación de compañeros: de lunes a domingo en hora de
+// Colombia, como INSTANTES (se comparan con StudySession.completedAt). Empieza
+// el lunes a las 00:00 de Bogotá (las 05:00 UTC) y termina el lunes
+// siguiente a la misma hora (sin incluirlo).
+export function weekInAppTimeZone(now: Date = new Date()): { start: Date; end: Date } {
+  const today = todayDateInAppTimeZone(now);
+  // getUTCDay: 0 = domingo. Días desde el lunes: lunes 0 … domingo 6.
+  const sinceMonday = (today.getUTCDay() + 6) % 7;
+  const start = new Date(today.getTime() - sinceMonday * DAY_MS + APP_UTC_OFFSET_MS);
+  return { start, end: new Date(start.getTime() + 7 * DAY_MS) };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 // "20 de octubre de 2026". En UTC, porque así se guardó (ver arriba).
 const dueDateFormatter = new Intl.DateTimeFormat("es-CO", {
   timeZone: "UTC",

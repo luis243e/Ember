@@ -1,5 +1,6 @@
 import Image from "next/image";
-import { Flame } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, Flame, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { levelForSouls, type FlameState } from "@/lib/game";
 import { formatNumber } from "@/lib/text";
@@ -16,6 +17,10 @@ type CharacterCardProps = {
   // Estado de la llama (con las brasas), ya calculado con flameState() (lo hace AppShell una
   // sola vez para los dos bloques, el de escritorio y el de móvil).
   flame: FlameState;
+  // Las bendiciones activas (chips con los usos que quedan) y el título
+  // equipado (bajo el nombre), o null.
+  blessings: { key: string; name: string; short: string; effect: string; usesLeft: number }[];
+  title: string | null;
   className?: string;
 };
 
@@ -24,7 +29,7 @@ type CharacterCardProps = {
 // siguiente nivel. Componente de servidor: no manda JavaScript al navegador.
 // El nivel se deduce de las almas con levelForSouls(), igual que en el
 // servidor al golpear.
-export function CharacterCard({ user, flame, className }: CharacterCardProps) {
+export function CharacterCard({ user, flame, blessings, title, className }: CharacterCardProps) {
   const { level, soulsIntoLevel, nextLevelCost } = levelForSouls(user.souls);
   const atMaxLevel = nextLevelCost === null;
   const percent = atMaxLevel ? 100 : (soulsIntoLevel / nextLevelCost) * 100;
@@ -40,35 +45,61 @@ export function CharacterCard({ user, flame, className }: CharacterCardProps) {
       )}
     >
       <div className="flex items-center gap-3">
-        {/* Decorativo (alt=""): el nombre ya está al lado. */}
-        <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-[1.5px] border-gold bg-night font-display text-xl leading-none font-bold text-gold-bright">
-          {user.image ? (
-            // unoptimized: la foto vendrá de otro dominio (Google) y se
-            // sirve tal cual, sin pasar por el optimizador de Next (que
-            // exigiría declarar el dominio en next.config).
-            <Image
-              src={user.image}
-              alt=""
-              width={48}
-              height={48}
-              unoptimized
-              className="size-full object-cover"
-            />
-          ) : (
-            <span aria-hidden>{initialOf(user.name)}</span>
-          )}
-        </div>
-        {/* min-w-0: sin esto, truncate no puede cortar dentro de un flex.
-            flex-1: la columna llega hasta la de la llama, que queda a la
+        {/* Avatar, nombre y nivel llevan al perfil (también en móvil, donde
+            el perfil no está en las pestañas). El chevron dice que se puede
+            pulsar; aria-label da una frase entera al lector de pantalla.
+            min-w-0 + flex-1: el nombre se trunca y la llama queda a la
             derecha. */}
-        <div className="flex min-w-0 flex-1 flex-col gap-[3px] leading-[normal]">
-          <p title={user.name} className="truncate text-[15px] font-semibold text-parchment">
-            {user.name}
-          </p>
-          <p className="font-display text-xs font-bold tracking-[1.5px] text-gold uppercase">
-            Nivel {level}
-          </p>
-        </div>
+        <Link
+          href="/perfil"
+          aria-label={`Tu perfil: ${user.name}${title ? `, ${title}` : ""}, nivel ${level}`}
+          className="group/perfil -m-1 flex min-w-0 flex-1 items-center gap-3 rounded-md p-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright"
+        >
+          {/* Decorativo (alt=""): el nombre ya está al lado. */}
+          <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-[1.5px] border-gold bg-night font-display text-xl leading-none font-bold text-gold-bright">
+            {user.image ? (
+              // unoptimized: la foto viene de otro dominio (Google,
+              // lh3.googleusercontent.com) y se sirve tal cual, sin pasar por
+              // el optimizador de Next (que exigiría declarar el dominio en
+              // next.config). no-referrer: Google puede negar la foto si la
+              // petición dice de qué página viene, y así tampoco se le cuenta.
+              <Image
+                src={user.image}
+                alt=""
+                width={48}
+                height={48}
+                unoptimized
+                referrerPolicy="no-referrer"
+                className="size-full object-cover"
+              />
+            ) : (
+              <span aria-hidden>{initialOf(user.name)}</span>
+            )}
+          </div>
+          {/* min-w-0: sin esto, truncate no puede cortar dentro de un flex.
+              flex-1: la columna llega hasta la de la llama, que queda a la
+              derecha. */}
+          <div className="flex min-w-0 flex-1 flex-col gap-[3px] leading-[normal]">
+            <p
+              title={user.name}
+              className="flex min-w-0 items-center gap-1 text-[15px] font-semibold text-parchment"
+            >
+              <span className="truncate group-hover/perfil:underline">{user.name}</span>
+              {/* Solo en móvil: en escritorio el perfil ya está en la barra
+                  lateral, y aquí el chevron le quitaría sitio al nombre. */}
+              <ChevronRight aria-hidden size={14} className="shrink-0 text-smoke md:hidden" />
+            </p>
+            {/* El título de la reliquia equipada: solo adorna. */}
+            {title && (
+              <p title={title} className="truncate text-xs text-ash italic">
+                {title}
+              </p>
+            )}
+            <p className="font-display text-xs font-bold tracking-[1.5px] text-gold uppercase">
+              Nivel {level}
+            </p>
+          </div>
+        </Link>
         {/* "llama y brasas" (104:2, nodo 105:221): la llama arriba y, debajo,
             las brasas, alineadas a la derecha. */}
         <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -101,6 +132,18 @@ export function CharacterCard({ user, flame, className }: CharacterCardProps) {
           {soulsText}
         </p>
       </div>
+
+      {/* Las bendiciones activas, como chips pequeños: nombre corto y usos.
+          Cada uno es role="img" con una frase entera para el lector. */}
+      {blessings.length > 0 && (
+        <ul aria-label="Bendiciones activas" className="flex flex-wrap gap-1.5">
+          {blessings.map((blessing) => (
+            <li key={blessing.key}>
+              <BlessingChip blessing={blessing} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -177,6 +220,24 @@ function EmberChip({ embers }: { embers: number }) {
     >
       <span aria-hidden className="size-2 rounded-full bg-ember shadow-[0_0_6px_var(--color-ember)]" />
       <span>{formatNumber(embers)}</span>
+    </p>
+  );
+}
+
+// "Almas ×3": una bendición activa y sus usos.
+function BlessingChip({ blessing }: { blessing: CharacterCardProps["blessings"][number] }) {
+  const uses = blessing.usesLeft === 1 ? "queda 1 uso" : `quedan ${blessing.usesLeft} usos`;
+  const label = `${blessing.name}: ${uses}. ${blessing.effect}`;
+  return (
+    <p
+      role="img"
+      aria-label={label}
+      title={label}
+      className="flex items-center gap-1 rounded-full border border-gold/40 px-2 py-0.5 text-[11px] leading-[normal] font-semibold text-gold"
+    >
+      <Sparkles aria-hidden size={11} className="shrink-0" />
+      {blessing.short}
+      <span className="text-ash">×{blessing.usesLeft}</span>
     </p>
   );
 }

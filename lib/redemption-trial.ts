@@ -21,13 +21,17 @@
 //     no toca la llama: solo, al aprobar, devuelve las almas de la misión;
 //   - una pregunta borrada a mitad se salta y no cuenta como acierto.
 //
+//   - el Sello de redención (una bendición) se GASTA al empezar: esa prueba
+//     se aprueba con 3 (BLESSING_RULES.sealPassWith), guardado en passWith.
+//
 // ORDEN DE BLOQUEO (lib/locks.ts):
-//   empezar:   usuario → misión → (crea la prueba);
+//   empezar:   usuario → misión → bendiciones (el Sello) → (crea la prueba);
 //   contestar: prueba → usuario → misión → pregunta.
 import { Prisma, type RedemptionRule } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { formatDeadline } from "@/lib/dates";
 import {
+  BLESSING_RULES,
   isReviewAfterFail,
   levelForSouls,
   nextReview,
@@ -37,7 +41,7 @@ import {
   trialAttemptsLeft,
   trialPassed,
 } from "@/lib/game";
-import { bloquearMision, bloquearUsuario } from "@/lib/locks";
+import { bloquearMision, bloquearUsuario, gastarBendicion } from "@/lib/locks";
 import {
   buildItems,
   parseItems,
@@ -145,12 +149,20 @@ export async function loadTrialStatus(userId: string, now: Date = new Date()): P
 // navegador (publicQuestion: enunciado y opciones barajadas, ni el id de la
 // pregunta, ni la correcta, ni la explicación). null = no hay prueba abierta.
 // question null = se borró del banco a mitad de la prueba.
-export type TrialQuestionData = { id: string; number: number; total: number; correct: number; question: PublicQuestion | null };
+// passWith: los aciertos que bastan en ESTA prueba (3 con el Sello).
+export type TrialQuestionData = {
+  id: string;
+  number: number;
+  total: number;
+  correct: number;
+  passWith: number;
+  question: PublicQuestion | null;
+};
 
 export async function loadOpenTrial(userId: string, trialId: string): Promise<TrialQuestionData | null> {
   const trial = await prisma.redemptionTrial.findFirst({
     where: { id: trialId, userId, finishedAt: null },
-    select: { id: true, items: true, answered: true, correctCount: true },
+    select: { id: true, items: true, answered: true, correctCount: true, passWith: true },
   });
   if (!trial) return null;
   const items = parseTrialItems(trial.items);
@@ -162,6 +174,7 @@ export async function loadOpenTrial(userId: string, trialId: string): Promise<Tr
     number: trial.answered,
     total: items.length,
     correct: trial.correctCount,
+    passWith: trial.passWith,
     question: question ? publicQuestion(question, item) : null,
   };
 }
@@ -182,7 +195,7 @@ export async function comenzarPruebaDe(userId: string, now: Date = new Date()): 
       // primero aunque aquí no se escriba: crear la prueba (clave foránea a
       // User) toma FOR KEY SHARE sobre él, y pedirlo después de la misión
       // iría al revés que el golpe (usuario → misión).
-      await bloquearUsuario(tx, userId);
+      const owner = await bloquearUsuario(tx, userId);
       const mission = await bloquearMision(tx, userId);
       if (!mission || mission.rule !== "TRIAL") return fail(TRIAL_ERRORS.noMission);
       if (now.getTime() >= mission.deadline.getTime()) return fail(TRIAL_ERRORS.expired);
@@ -240,9 +253,15 @@ export async function comenzarPruebaDe(userId: string, now: Date = new Date()): 
       });
       if (questions.length < REDEMPTION.trial.questions) return fail(TRIAL_ERRORS.fewQuestions);
 
-      // 4. La prueba nueva y el intento gastado, en la misma transacción.
+      // 4. El Sello de redención, si lo tiene: esta prueba se aprueba con 3,
+      // y se gasta aquí, en la misma transacción que la empieza.
+      const seal = owner.blessings.find((b) => b.key === "REDEMPTION_SEAL");
+      if (seal) await gastarBendicion(tx, userId, seal);
+      const passWith = seal ? BLESSING_RULES.sealPassWith : REDEMPTION.trial.passWith;
+
+      // 5. La prueba nueva y el intento gastado, en la misma transacción.
       const trial = await tx.redemptionTrial.create({
-        data: { missionId: mission.id, userId, items: buildItems(questions) },
+        data: { missionId: mission.id, userId, items: buildItems(questions), passWith },
         select: { id: true },
       });
       await tx.redemptionMission.update({
@@ -276,6 +295,8 @@ export type TrialSummary = {
   correct: number;
   total: number;
   passed: boolean;
+  // Los que bastaban (3 con el Sello de redención).
+  passWith: number;
   // Las almas que vuelven (0 si no aprobó).
   recoveredSouls: number;
   newLevel?: number;
@@ -305,9 +326,16 @@ class PreguntaBorrada extends Error {}
 // es de otro (la acción responde 404 sin distinguir). Va la primera.
 async function bloquearPrueba(tx: Prisma.TransactionClient, trialId: string, userId: string) {
   const rows = await tx.$queryRaw<
-    { missionId: string; items: Prisma.JsonValue; answered: number; correctCount: number; finishedAt: Date | null }[]
+    {
+      missionId: string;
+      items: Prisma.JsonValue;
+      answered: number;
+      correctCount: number;
+      finishedAt: Date | null;
+      passWith: number;
+    }[]
   >`
-    SELECT "missionId", "items", "answered", "correctCount", "finishedAt" FROM "RedemptionTrial"
+    SELECT "missionId", "items", "answered", "correctCount", "finishedAt", "passWith" FROM "RedemptionTrial"
     WHERE "id" = ${trialId} AND "userId" = ${userId} FOR UPDATE`;
   return rows[0];
 }
@@ -394,7 +422,8 @@ export async function responderPruebaDe(
       // item. Al contestar la última, termina y se sabe si aprobó.
       const correctCount = trial.correctCount + (outcome === "correct" ? 1 : 0);
       const isLast = trial.answered + 1 >= items.length;
-      const passed = isLast && trialPassed(correctCount);
+      // Con los aciertos que se fijaron al empezarla (3 con el Sello).
+      const passed = isLast && trialPassed(correctCount, trial.passWith);
       const nextItems = items.map((it, i) => (i === trial.answered ? { ...it, correct: outcome === "correct" } : it));
       await tx.redemptionTrial.update({
         where: { id: trialId },
@@ -436,6 +465,7 @@ export async function responderPruebaDe(
           correct: correctCount,
           total: items.length,
           passed,
+          passWith: trial.passWith,
           recoveredSouls: passed ? mission.soulsAtStake : 0,
           ...(newLevel && { newLevel }),
           failedPrompts: failedRefs.flatMap((ref) => (promptById.has(ref) ? [promptById.get(ref)!] : [])),

@@ -12,9 +12,10 @@ import {
   Swords,
   type LucideIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { BestiaryStrip, BossCardMock } from "@/components/landing/boss-showcase";
 import { CounterattackMock } from "@/components/landing/counterattack-mock";
+import { DeletedAccountNotice } from "@/components/landing/deleted-account-notice";
 import { Embers } from "@/components/landing/embers";
 import { HeroVideo } from "@/components/landing/hero-video";
 import { Reveal } from "@/components/landing/reveal";
@@ -145,8 +146,8 @@ const FEATURES: {
     icon: Dices,
     title: "Recompensas roguelike",
     description:
-      "Tras cada combate, reliquias y bendiciones que adornan tu camino, nunca atajos para no estudiar.",
-    comingSoon: true,
+      "Al vencer a un jefe eliges 1 de 3 bendiciones (más almas por golpe, un escudo contra el contraataque, una opción tachada…) y ganas reliquias que te dan un título. Ninguna acorta la vigilia ni quita vida al jefe.",
+    comingSoon: false,
   },
 ];
 
@@ -182,6 +183,16 @@ const FAQS = [
       `El jefe cae y te quita las almas de tu nivel actual, nunca el nivel. Tienes ${REDEMPTION_HOURS} horas para recuperarlas: cada vigilia que completes te da un intento de la prueba de redención, ${TRIAL_QUESTIONS} preguntas de la materia de ese jefe. Con ${TRIAL_PASS} aciertos, las almas vuelven; si no, otra vigilia te da otro intento. Si esa materia tiene menos de ${TRIAL_QUESTIONS} preguntas, bastan ${REDEMPTION_VIGILS} vigilias.`,
   },
   {
+    question: "¿Puedo estudiar con mis amigos?",
+    answer:
+      "Sí. Comparte tu código de compañero y veréis quién asesta más golpes cada semana. Solo entre amigos: nadie más lo ve, y nunca se enseña tu correo ni tus preguntas.",
+  },
+  {
+    question: "¿Puedo borrar mi cuenta?",
+    answer:
+      "Sí, desde tu perfil, cuando quieras. Se borra todo lo tuyo (materias, jefes, preguntas, respuestas y progreso) y no queda ninguna copia.",
+  },
+  {
     question: "¿Cuánto cuesta?",
     answer: "Nada. Ember es gratis.",
   },
@@ -192,6 +203,10 @@ export default function Home() {
     <>
       <SiteHeader />
       <main className="flex-1">
+        {/* Solo tras borrar la cuenta (ver el componente). */}
+        <Suspense fallback={null}>
+          <DeletedAccountNotice className={cn(SECTION_X, "pt-6")} />
+        </Suspense>
         <Hero />
         <Stats />
         <HowItWorks />

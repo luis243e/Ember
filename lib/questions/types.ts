@@ -40,4 +40,7 @@ export type PublicQuestion = {
   review: boolean;
   prompt: string;
   options: string[];
+  // La opción MOSTRADA que tachó el Ojo del escriba (deshabilitada), o null.
+  // Nunca dice cuál es la correcta.
+  struck: number | null;
 };

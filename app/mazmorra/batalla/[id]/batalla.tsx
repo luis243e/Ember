@@ -12,7 +12,8 @@ import { ButtonLink, buttonStyles } from "@/components/ui/button";
 import { Eyebrow } from "@/components/ui/eyebrow";
 import { HpBar } from "@/components/ui/hp-bar";
 import { cn } from "@/lib/cn";
-import { HP_PER_BLOCK } from "@/lib/game";
+import { HP_PER_BLOCK, RELICS, type RelicKey } from "@/lib/game";
+import type { VictoryRewards as VictoryRewardsData } from "@/lib/rewards";
 import { formatNumber } from "@/lib/text";
 import {
   abandonarVigilia,
@@ -22,6 +23,7 @@ import {
 } from "./actions";
 import { formatCountdown } from "./countdown";
 import { CounterattackPanel, type CounterattackData } from "./counterattack-panel";
+import { VictoryRewards } from "./victory-rewards";
 
 type BatallaProps = {
   task: {
@@ -46,6 +48,8 @@ type BatallaProps = {
   // Contraataque sin terminar contra este jefe (solo lo que puede verse antes
   // de contestar), o null.
   counterattack: CounterattackData | null;
+  // Si el jefe cayó: la oferta de bendiciones y la reliquia de la victoria.
+  victory: VictoryRewardsData | null;
 };
 
 // idle = sin vigilia; running = vigilia en curso; ready = cumplida, falta el
@@ -79,6 +83,7 @@ export function Batalla({
   summary,
   reward,
   counterattack,
+  victory,
 }: BatallaProps) {
   // Hora actual, siempre en la escala del SERVIDOR. Empieza en serverNow para
   // que el primer pintado del navegador coincida con el del servidor.
@@ -105,6 +110,11 @@ export function Batalla({
   // Como el nivel, solo vive aquí y en el momento: el golpe ya escribió la
   // llama, y la base no recuerda que se gastó una.
   const [emberSaved, setEmberSaved] = useState<{ spent: number; left: number } | null>(null);
+  // Recompensas del último golpe, como el nivel: las almas extra de la
+  // Bendición de las almas y las reliquias (un hito de la llama o, al vencer,
+  // la del jefe, que la victoria enseña también al recargar).
+  const [blessingBonus, setBlessingBonus] = useState<number | null>(null);
+  const [relicsEarned, setRelicsEarned] = useState<RelicKey[]>([]);
   const [hitting, setHitting] = useState(false);
   const [justDefeated, setJustDefeated] = useState(false);
   // Golpe tardío (vigilia que cruzó la medianoche y jefe que no muere): la
@@ -205,6 +215,8 @@ export function Batalla({
     setRecoveredSouls(null);
     setTrialGranted(false);
     setEmberSaved(null);
+    setBlessingBonus(null);
+    setRelicsEarned([]);
     startTransition(async () => {
       const result = await action(task.id);
       setConfirming(false);
@@ -235,15 +247,20 @@ export function Batalla({
           ? { spent: result.embersSpent, left: result.embersLeft ?? 0 }
           : null;
         setEmberSaved(saved);
+        setBlessingBonus(result.blessingBonus ?? null);
+        setRelicsEarned(result.relicsEarned ?? []);
         // Lo recuperado va antes que el nivel: es lo que lo hace subir. La
-        // brasa, al final.
+        // brasa y las reliquias, al final. La bendición, junto a las almas.
+        const relicText = (result.relicsEarned ?? []).map((key) => ` Reliquia conseguida: ${RELICS[key].name}.`).join("");
         const levelText =
+          (result.blessingBonus ? ` ${blessingBonusText(result.blessingBonus)}.` : "") +
           (result.recoveredSouls
             ? ` Misión de redención cumplida: recuperas ${formatNumber(result.recoveredSouls)} almas.`
             : "") +
           (result.trialGranted ? ` ${TRIAL_GRANTED_TEXT}` : "") +
           (result.newLevel ? ` Has alcanzado el nivel ${result.newLevel}.` : "") +
-          (saved ? ` ${emberSavedText(saved.spent, saved.left).join(" ")}` : "");
+          (saved ? ` ${emberSavedText(saved.spent, saved.left).join(" ")}` : "") +
+          relicText;
         if (result.defeated) {
           setJustDefeated(true);
           setAnnouncement(
@@ -570,18 +587,42 @@ export function Batalla({
                       </span>
                     </p>
                   )}
+                  {blessingBonus !== null && <BlessingBonus bonus={blessingBonus} />}
                   {recoveredSouls !== null && <Recovered souls={recoveredSouls} />}
                   {trialGranted && <TrialGranted />}
                   {newLevel && <LevelUp level={newLevel} />}
                 </div>
               )}
               {emberSaved && <EmberSavedNotice spent={emberSaved.spent} left={emberSaved.left} />}
+              {/* Las cartas van debajo de la escena: en escritorio quedan fuera
+                  de la vista, así que aquí se avisa y se salta a ellas. */}
+              {victory?.offer && !victory.offer.chosenKey && !victory.offer.expired && (
+                <a
+                  href="#elige-bendicion"
+                  className={cn(
+                    "mt-2 rounded-sm text-[15px] leading-normal font-semibold text-gold-bright underline underline-offset-2",
+                    FOCUS_RING,
+                  )}
+                >
+                  Elige tu bendición ↓
+                </a>
+              )}
               <ButtonLink href="/mazmorra" className="mt-4">
                 Volver a la mazmorra
               </ButtonLink>
             </div>
           )}
         </section>
+
+        {/* Vencido: la reliquia y las cartas de bendición, debajo de la
+            escena (en escritorio no caben en el marco 16:9). Una reliquia de
+            llama ganada con el golpe final va aquí también. */}
+        {defeated && relicsEarned.some((key) => key.startsWith("flame:")) && (
+          <div className="w-full px-4 pt-5 @2xl:max-w-5xl @2xl:px-0">
+            <RelicsEarned keys={relicsEarned.filter((key) => key.startsWith("flame:"))} />
+          </div>
+        )}
+        {defeated && victory && <VictoryRewards victory={victory} />}
 
         {/* Debajo de la escena: errores, aviso de otra vigilia o ayuda. */}
         {!defeated && (
@@ -590,6 +631,8 @@ export function Batalla({
             {/* Si el golpe fue el final, el nivel sale en la victoria: aquí
                 no, ni en el instante en que llega la respuesta y la página
                 aún no se ha repintado. */}
+            {blessingBonus !== null && !justDefeated && <BlessingBonus bonus={blessingBonus} />}
+            {relicsEarned.length > 0 && !justDefeated && <RelicsEarned keys={relicsEarned} />}
             {recoveredSouls !== null && !justDefeated && <Recovered souls={recoveredSouls} />}
             {trialGranted && !justDefeated && <TrialGranted />}
             {newLevel && !justDefeated && <LevelUp level={newLevel} />}
@@ -649,6 +692,35 @@ function TrialGranted() {
         Afróntala desde la mazmorra
       </Link>
     </p>
+  );
+}
+
+// "+12 almas por la Bendición de las almas": el extra de ESTE golpe (ya va
+// sumado en el "+N almas"). Se anuncia donde actúa.
+function blessingBonusText(bonus: number): string {
+  return `+${formatNumber(bonus)} ${bonus === 1 ? "alma" : "almas"} (+25 %) por la Bendición de las almas`;
+}
+
+function BlessingBonus({ bonus }: { bonus: number }) {
+  return (
+    <p className="text-center text-[15px] leading-[normal] font-semibold text-gold @2xl:text-[17px]">
+      {blessingBonusText(bonus)}
+    </p>
+  );
+}
+
+// "Reliquia conseguida: Llama de siete noches" (un hito de la llama con un
+// golpe normal). La del jefe sale en la victoria (VictoryRewards).
+function RelicsEarned({ keys }: { keys: RelicKey[] }) {
+  return (
+    <>
+      {keys.map((key) => (
+        <p key={key} className="text-center text-[15px] leading-normal font-semibold text-gold-bright @2xl:text-[17px]">
+          Reliquia conseguida: {RELICS[key].name}.{" "}
+          <span className="font-normal text-ash">Te da el título «{RELICS[key].title}».</span>
+        </p>
+      ))}
+    </>
   );
 }
 

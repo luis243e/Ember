@@ -2,7 +2,7 @@
 // usen los mismos números.
 // "import type" no carga Prisma: solo trae el tipo, que desaparece al
 // compilar. Por eso este archivo también se puede usar en el navegador.
-import type { Difficulty, RedemptionRule } from "@prisma/client";
+import type { BlessingKey, Difficulty, RedemptionRule } from "@prisma/client";
 import { parseDateInput, startOfTodayInAppTimeZone, todayDateInAppTimeZone } from "@/lib/dates";
 
 // Vida que quita cada bloque de estudio.
@@ -500,9 +500,11 @@ export function trialAttemptsLeft(mission: { rule: RedemptionRule; vigilsDone: n
   return mission.rule === "TRIAL" ? Math.max(mission.vigilsDone - mission.trialsUsed, 0) : 0;
 }
 
-// ¿Aprobada? Aciertos de la prueba, contra el mínimo.
-export function trialPassed(correct: number): boolean {
-  return correct >= REDEMPTION.trial.passWith;
+// ¿Aprobada? Aciertos de la prueba, contra el mínimo. passWith es el que se
+// fijó al empezarla (RedemptionTrial.passWith): 4, o 3 con el Sello de
+// redención (BLESSING_RULES.sealPassWith).
+export function trialPassed(correct: number, passWith: number = REDEMPTION.trial.passWith): boolean {
+  return correct >= passWith;
 }
 
 // Horas que siguen saliendo los avisos al entrar ("Has recuperado tus almas",
@@ -696,4 +698,239 @@ export function bossForTask(task: {
 // Ruta pública de la ilustración de un jefe (1600 × 900, webp).
 export function bossImageSrc(key: BossKey): string {
   return `/jefes/${key}.webp`;
+}
+
+// ---------------------------------------------------------------------------
+//  Recompensas: bendiciones (temporales) y reliquias (cosméticas)
+// ---------------------------------------------------------------------------
+
+// REGLA DE ORO: ninguna recompensa es un atajo para no estudiar. Ninguna
+// acorta la vigilia, quita vida al jefe ni da golpes: solo cambian almas,
+// brasas, las preguntas del contraataque (una opción tachada) o el mínimo de
+// la prueba de redención. scripts/probar-recompensas.ts lo comprueba.
+//
+// Las bendiciones se ofrecen al vencer a un jefe (hasta 3 distintas, se elige
+// una) y se GASTAN en la misma transacción que las usa: el golpe (Almas), la
+// respuesta al contraataque (Escudo), la creación del contraataque (Lucidez y
+// Ojo) o el comienzo de la prueba (Sello). La Chispa se aplica al elegirla.
+
+export type BlessingRarity = "common" | "rare" | "epic";
+
+export type BlessingInfo = {
+  name: string;
+  // Nombre corto, para el chip de la tarjeta del personaje.
+  short: string;
+  rarity: BlessingRarity;
+  // Usos al elegirla. 0 = se aplica en el momento y no queda activa (Chispa).
+  uses: number;
+  // El efecto, en una línea (cartas de la victoria y chips).
+  effect: string;
+};
+
+export const BLESSING_RULES = {
+  // Pesos de la oferta por rareza, iguales para todos los jefes. Con ellos
+  // (calculados de forma exacta, ver docs): en un jefe medio sale al menos
+  // una rara en el 79,7 % de las ofertas; en uno difícil, el Sello en el
+  // 27,1 % (y alguna rara o la épica en el 85,4 %).
+  weights: { common: 100, rare: 60, epic: 35 },
+  // Qué rarezas ofrece cada dificultad.
+  rarities: { EASY: ["common"], MEDIUM: ["common", "rare"], HARD: ["common", "rare", "epic"] },
+  offerSize: 3,
+  // Días que una oferta sin elegir sigue pendiente.
+  offerDays: 7,
+  // Almas: +25 % de las almas del golpe (hacia abajo).
+  soulsBonusPercent: 25,
+  // Lucidez: almas extra por cada acierto del banco.
+  lucidityBonus: 5,
+  // Sello: aciertos que bastan en la prueba.
+  sealPassWith: 3,
+} as const satisfies {
+  weights: Record<BlessingRarity, number>;
+  rarities: Record<Difficulty, readonly BlessingRarity[]>;
+  offerSize: number;
+  offerDays: number;
+  soulsBonusPercent: number;
+  lucidityBonus: number;
+  sealPassWith: number;
+};
+
+export const BLESSINGS: Record<BlessingKey, BlessingInfo> = {
+  SOULS: {
+    name: "Bendición de las almas",
+    short: "Almas",
+    rarity: "common",
+    uses: 3,
+    effect: "+25 % de almas en tus próximos 3 golpes.",
+  },
+  ASH_SHIELD: {
+    name: "Escudo de ceniza",
+    short: "Escudo",
+    rarity: "common",
+    uses: 2,
+    effect: "Tus 2 próximas respuestas falladas del contraataque no restan almas.",
+  },
+  LUCIDITY: {
+    name: "Bendición de la lucidez",
+    short: "Lucidez",
+    rarity: "common",
+    uses: 1,
+    effect: "En tu próximo contraataque, cada acierto da +5 almas.",
+  },
+  EMBER_SPARK: {
+    name: "Chispa de la hoguera",
+    short: "Chispa",
+    rarity: "rare",
+    uses: 0,
+    effect: "+1 brasa ahora mismo.",
+  },
+  SCRIBE_EYE: {
+    name: "Ojo del escriba",
+    short: "Ojo",
+    rarity: "rare",
+    uses: 1,
+    effect: "En tu próximo contraataque, una opción incorrecta tachada en cada pregunta de opción múltiple.",
+  },
+  REDEMPTION_SEAL: {
+    name: "Sello de redención",
+    short: "Sello",
+    rarity: "epic",
+    uses: 1,
+    effect: "Tu próxima prueba de redención se aprueba con 3 de 5.",
+  },
+};
+
+export const BLESSING_KEYS = Object.keys(BLESSINGS) as BlessingKey[];
+
+export const RARITY_LABELS: Record<BlessingRarity, string> = { common: "Común", rare: "Rara", epic: "Épica" };
+
+export function isBlessingKey(value: unknown): value is BlessingKey {
+  return typeof value === "string" && Object.hasOwn(BLESSINGS, value);
+}
+
+// LA regla de qué bendiciones se pueden ofrecer (y elegir):
+//   - las de las rarezas de su dificultad;
+//   - ninguna que ya esté activa;
+//   - la Chispa, solo si caben más brasas (EMBER.max);
+//   - el Sello, solo si no hay misión activa (servirá para la próxima) o la
+//     activa es de prueba (TRIAL). Con una misión de 2 vigilias no serviría.
+// active: las que tiene DESPUÉS de lo que haya gastado el golpe que vence.
+export function eligibleBlessings(state: {
+  difficulty: Difficulty;
+  active: readonly BlessingKey[];
+  embers: number;
+  mission: { rule: RedemptionRule } | null;
+}): BlessingKey[] {
+  const rarities = BLESSING_RULES.rarities[state.difficulty] as readonly BlessingRarity[];
+  return BLESSING_KEYS.filter((key) => {
+    if (!rarities.includes(BLESSINGS[key].rarity)) return false;
+    return blessingUsableNow(key, state);
+  });
+}
+
+// La parte de la regla que no depende de la dificultad: lo que se vuelve a
+// comprobar al ELEGIR (entre la oferta y la elección pueden cambiar las
+// brasas, la misión o las bendiciones activas).
+export function blessingUsableNow(
+  key: BlessingKey,
+  state: { active: readonly BlessingKey[]; embers: number; mission: { rule: RedemptionRule } | null },
+): boolean {
+  if (state.active.includes(key)) return false;
+  if (key === "EMBER_SPARK" && state.embers >= EMBER.max) return false;
+  if (key === "REDEMPTION_SEAL" && state.mission !== null && state.mission.rule !== "TRIAL") return false;
+  return true;
+}
+
+// LA regla de la oferta: hasta 3 distintas de las elegibles, sacadas una a
+// una con probabilidad proporcional a su peso (sin reemplazo). random: un
+// número en [0, 1); se pasa para poder probarlo. Devuelve las claves en el
+// orden en que se sacaron (el de las cartas).
+export function rollBlessingOffer(eligible: readonly BlessingKey[], random: () => number): BlessingKey[] {
+  const pool = [...new Set(eligible)];
+  const weight = (key: BlessingKey) => BLESSING_RULES.weights[BLESSINGS[key].rarity];
+  const chosen: BlessingKey[] = [];
+  while (chosen.length < BLESSING_RULES.offerSize && pool.length > 0) {
+    const total = pool.reduce((sum, key) => sum + weight(key), 0);
+    let r = random() * total;
+    let index = 0;
+    for (; index < pool.length - 1; index++) {
+      r -= weight(pool[index]);
+      if (r < 0) break;
+    }
+    chosen.push(pool.splice(index, 1)[0]);
+  }
+  return chosen;
+}
+
+// Bendición de las almas: las almas EXTRA de un golpe (solo las del golpe, no
+// las de la victoria ni las del contraataque), hacia abajo.
+export function soulsBlessingBonus(strikeSouls: number): number {
+  return Math.floor((Math.max(strikeSouls, 0) * BLESSING_RULES.soulsBonusPercent) / 100);
+}
+
+// Escudo de ceniza: ¿protege esta respuesta? Solo si de verdad iba a restar
+// almas (applied < 0, ya con el suelo del nivel). Esquivar (0) o un fallo que
+// el nivel ya dejaba en 0 no gastan el escudo.
+export function ashShieldApplies(applied: number): boolean {
+  return applied < 0;
+}
+
+// Ojo del escriba: la opción MOSTRADA que se tacha en una pregunta de opción
+// múltiple, una incorrecta al azar. order es la permutación del contraataque
+// (la mostrada i es la original order[i]); pick(n) da un entero en [0, n)
+// (randomInt de node:crypto en el servidor). La correcta nunca sale.
+export function struckOptionFor(order: readonly number[], correctIndex: number, pick: (n: number) => number): number {
+  const wrong = order.flatMap((original, shown) => (original === correctIndex ? [] : [shown]));
+  return wrong[pick(wrong.length)];
+}
+
+// Fecha en que caduca una oferta creada en `now`.
+export function blessingOfferExpiry(now: Date): Date {
+  return new Date(now.getTime() + BLESSING_RULES.offerDays * DAY_MS);
+}
+
+// Reliquias: permanentes y SOLO cosméticas (un título bajo el nombre). Una
+// por cada jefe del bestiario, la primera vez que se vence, y tres por los
+// hitos de la llama. La clave se guarda en Relic.key: no se cambian ni se
+// reutilizan (la migración fase4 rellenó las de los jefes ya vencidos).
+export type RelicInfo = {
+  name: string;
+  // El título que se puede equipar.
+  title: string;
+  // Cómo se consigue (también para las que faltan, en silueta).
+  how: string;
+};
+
+export const FLAME_MILESTONES = [7, 30, 100] as const;
+
+export type RelicKey = `boss:${BossKey}` | `flame:${(typeof FLAME_MILESTONES)[number]}`;
+
+export const RELICS: Record<RelicKey, RelicInfo> = {
+  "boss:centinela-de-huesos": { name: "Falange del centinela", title: "Quebrahuesos", how: "Vence a un Centinela de huesos." },
+  "boss:rata-de-las-cloacas": { name: "Bigote de la rata", title: "Señor de las cloacas", how: "Vence a una Rata de las cloacas." },
+  "boss:ogro-de-las-ruinas": { name: "Colmillo del ogro", title: "Derribaogros", how: "Vence a un Ogro de las ruinas." },
+  "boss:caballero-hueco": { name: "Yelmo vacío", title: "Rompearmaduras", how: "Vence a un Caballero hueco." },
+  "boss:dragon-de-la-caverna": { name: "Colmillo del dragón", title: "Matadragones", how: "Vence a un Dragón de la caverna." },
+  "boss:liche-del-osario": { name: "Corona del liche", title: "Azote de liches", how: "Vence a un Liche del osario." },
+  "flame:7": { name: "Llama de siete noches", title: "Custodio de la llama", how: "Mantén la llama 7 días seguidos." },
+  "flame:30": { name: "Brasa de treinta noches", title: "Guardián de la brasa", how: "Mantén la llama 30 días seguidos." },
+  "flame:100": { name: "Corazón de la hoguera", title: "Señor de la hoguera", how: "Mantén la llama 100 días seguidos." },
+};
+
+export const RELIC_KEYS = Object.keys(RELICS) as RelicKey[];
+
+export function isRelicKey(value: unknown): value is RelicKey {
+  return typeof value === "string" && Object.hasOwn(RELICS, value);
+}
+
+export function relicKeyForBoss(boss: BossKey): RelicKey {
+  return `boss:${boss}`;
+}
+
+// Hitos de llama que se cruzan con un golpe: los que la racha nueva alcanza y
+// la mejor de antes no. Así un golpe normal no consulta nada y cada hito se
+// intenta dar una vez (el índice único lo asegura de todos modos).
+export function flameRelicsCrossed(bestBefore: number, flameNow: number): RelicKey[] {
+  return FLAME_MILESTONES.filter((days) => flameNow >= days && bestBefore < days).map(
+    (days) => `flame:${days}` as RelicKey,
+  );
 }

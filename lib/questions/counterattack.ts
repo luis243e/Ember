@@ -6,7 +6,7 @@
 // contestar; recibe solo publicQuestion().
 import { randomInt } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import type { CounterattackKind } from "@/lib/game";
+import { struckOptionFor, type CounterattackKind } from "@/lib/game";
 import { genericByKey } from "@/lib/questions/generic";
 import type { BattleQuestion, PublicQuestion } from "@/lib/questions/types";
 
@@ -16,7 +16,11 @@ import type { BattleQuestion, PublicQuestion } from "@/lib/questions/types";
 // review: true si, al crear el contraataque, la pregunta volvía después de
 // fallarla (el panel enseña "Repaso"). Se guarda solo cuando es true: los
 // items de antes del repaso no lo llevan y siguen siendo válidos.
-export type CounterattackItem = { ref: string; order: number[]; review?: true };
+// struck: la opción MOSTRADA que tachó el Ojo del escriba (una incorrecta,
+// elegida aquí, en el servidor). Solo en opción múltiple del banco y solo si
+// el Ojo estaba activo al crear el contraataque. Es lo único que el navegador
+// sabe de ella: cuál está tachada, nunca cuál es la correcta.
+export type CounterattackItem = { ref: string; order: number[]; review?: true; struck?: number };
 
 // Las genéricas no están en la base: su referencia es "generic:<clave>". Los
 // ids de Question (cuid) nunca llevan ":", así que no se confunden.
@@ -124,8 +128,36 @@ export function parseItems(json: Prisma.JsonValue): CounterattackItem[] {
     if (review !== undefined && typeof review !== "boolean") {
       throw new Error(`Counterattack.items[${i}].review no es un booleano.`);
     }
-    return review === true ? { ref, order, review } : { ref, order };
+    const { struck } = entry as Record<string, unknown>;
+    if (struck !== undefined && (n !== 4 || !Number.isInteger(struck) || (struck as number) < 0 || (struck as number) >= n)) {
+      throw new Error(`Counterattack.items[${i}].struck no es una opción válida.`);
+    }
+    return {
+      ref,
+      order: order as number[],
+      ...(review === true && { review: true as const }),
+      ...(struck !== undefined && { struck: struck as number }),
+    };
   });
+}
+
+// Ojo del escriba: tacha una opción incorrecta (al azar, con node:crypto) en
+// cada pregunta de opción múltiple DEL BANCO. Las genéricas no tienen
+// correcta y verdadero o falso quedaría resuelto. questions y items van en
+// el mismo orden (buildItems). struck: cuántas se han tachado (con 0, el Ojo
+// no se gasta: lib/battle.ts).
+export function strikeItems(
+  items: readonly CounterattackItem[],
+  questions: readonly BattleQuestion[],
+): { items: CounterattackItem[]; struck: number } {
+  let struck = 0;
+  const result = items.map((item, i) => {
+    const question = questions[i];
+    if (!question || question.type !== "MULTIPLE_CHOICE" || question.source === "GENERIC") return item;
+    struck++;
+    return { ...item, struck: struckOptionFor(item.order, question.correctIndex, (n) => randomInt(n)) };
+  });
+  return { items: result, struck };
 }
 
 // La pregunta de un item, con su respuesta, o null si ya no existe (se borró
@@ -191,5 +223,15 @@ export function publicQuestion(question: ResolvedQuestion, item: CounterattackIt
     review: item.review === true && !question.sealed,
     prompt: question.prompt,
     options: item.order.map((i) => question.options[i]),
+    struck: struckFor(item, question),
   };
+}
+
+// La opción tachada por el Ojo del escriba que de verdad vale, o null. Solo
+// si sigue siendo una incorrecta de una pregunta de opción múltiple: si la
+// pregunta se editó y la tachada pasó a ser la correcta, no se tacha nada.
+// La usan la página (publicQuestion) y la respuesta (que rechaza la tachada).
+export function struckFor(item: CounterattackItem, question: ResolvedQuestion): number | null {
+  if (item.struck === undefined || question.kind !== "MULTIPLE_CHOICE") return null;
+  return item.order[item.struck] === question.correctIndex ? null : item.struck;
 }

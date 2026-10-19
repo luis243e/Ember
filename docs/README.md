@@ -11,10 +11,11 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `main` se despliega solo.
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
-- **Base de datos:** 13 tablas (ver [Modelo de datos](#modelo-de-datos)),
-  creadas con 16 migraciones (la 14.ª, `20261012183227_repaso`, la 15.ª,
-  `20261014194417_brasa`, y la 16.ª, `20261018235832_fase3`, solo en la base
-  local; la 12.ª y la 13.ª ya están en `main`, commits `6026efc` y `53e2712`).
+- **Base de datos:** 17 tablas (ver [Modelo de datos](#modelo-de-datos)),
+  creadas con 17 migraciones (la 14.ª, `20261012183227_repaso`, la 15.ª,
+  `20261014194417_brasa`, la 16.ª, `20261018235832_fase3`, y la 17.ª,
+  `20261019120000_fase4`, solo en la base local; la 12.ª y la 13.ª ya están
+  en `main`, commits `6026efc` y `53e2712`).
   RLS activado en todas, y en producción también en `_prisma_migrations` (a
   mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
@@ -27,8 +28,18 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261018235832_fase3` (18 oct, sin commit;
-  solo en la base local): crea el enum `RedemptionRule`, añade `REINFORCE` a
+- **Migraciones:** la última es `20261019120000_fase4` (19 oct, sin commit;
+  solo en la base local): columnas nuevas en `User` (`bestFlame`,
+  `equippedRelic`, `friendCode` único, `showStats`, `friendRequestDay`,
+  `friendRequestCount`), `RedemptionTrial.passWith` (por defecto 4) y
+  `Counterattack.bonusPerCorrect` (por defecto 0); los enums `BlessingKey` y
+  `FriendshipStatus`; las tablas `Blessing`, `BlessingOffer`, `Relic` y
+  `Friendship` (con RLS); a mano, nueve `CHECK`, el índice único de la pareja
+  de compañeros (`LEAST`/`GREATEST`) y cuatro rellenos (códigos de amigo,
+  racha más larga como cota inferior, reliquias de los jefes ya vencidos e
+  hitos de llama). Solo añade cosas. Se creó con `migrate diff` (ver la
+  sesión). La anterior, `20261018235832_fase3` (18 oct, sin commit; solo en
+  la base local): crea el enum `RedemptionRule`, añade `REINFORCE` a
   `AgentInputKind`, `Question.topic` (opcional), `RedemptionMission.rule` (por
   defecto `LEGACY`: las misiones que ya existen siguen con 2 vigilias) y
   `RedemptionMission.trialsUsed` (por defecto 0), y crea `RedemptionTrial`
@@ -63,8 +74,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `20261008204228_boss_key_obligatorio` hizo `Task.bossKey` obligatoria. La de la batalla
   (`20261007210121_batalla`) creó el índice único parcial que permite una
   sola vigilia abierta por usuario.
-- **Funciona:** registro e inicio de sesión con correo y contraseña
-  (`/registro`, `/login`), página protegida `/mazmorra` y cierre de sesión.
+- **Funciona:** registro e inicio de sesión con correo y contraseña o con
+  Google (`/registro`, `/login`), página protegida `/mazmorra` y cierre de sesión.
   En producción se probaron el registro, el login y la redirección de
   `/mazmorra` sin sesión a `/login` (6 oct).
 - **Verificación de correo (10 oct, sin commit):** registrarse envía un
@@ -78,6 +89,30 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis. `GMAIL_USER` y `GMAIL_APP_PASSWORD` ya están en Vercel
   (*Production*). Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
+- **Fase 4 completa (19 oct, sin commit): perfil, Google, recompensas y
+  compañeros.**
+  - **Perfil (`/perfil`)**: nombre de vigilante (2–40), cambiar la contraseña
+    (o crearla si solo entras con Google) cerrando las demás sesiones, tus
+    hazañas (jefes por dificultad, golpes, horas, racha más larga, dominadas),
+    cuentas vinculadas, reliquias y título, privacidad con los compañeros y
+    **borrar la cuenta** (escribiendo «BORRAR» y, si tienes, la contraseña):
+    todo lo tuyo en cascada, a la landing con un aviso.
+  - **Google** en `/login` y `/registro`. Vincula con una cuenta existente
+    solo si Google y Ember tienen el correo verificado; si no, `/login` lleva
+    a «Olvidé mi contraseña» (nunca a «verifica»). Sin tokens guardados.
+    Probado de verdad en local con la cuenta de Luis (vincular y desvincular).
+  - **Recompensas**: al vencer a un jefe, 1 de 3 bendiciones (Almas, Escudo
+    de ceniza, Lucidez, Chispa, Ojo del escriba, Sello de redención), elegida
+    en la victoria o hasta 7 días después desde la mazmorra; reliquias de
+    jefes y de la llama que dan un título. Chips en la tarjeta del personaje
+    y avisos donde actúan.
+  - **Compañeros (`/companeros`)**: código de amigo, solicitudes (20 al día),
+    hasta 50, clasificación semanal (lunes a domingo, Bogotá). Nunca el
+    correo; sin `showStats`, solo el nombre.
+  - Probado en local (scripts `probar-perfil`, `probar-google`,
+    `probar-recompensas` y `probar-companeros`, todos los anteriores, `tsc`,
+    `eslint`, `next build`, Chrome y 320 px). Detalles en
+    [2026-10-19-fase-4-perfil-google-recompensas-companeros.md](sesiones/2026-10-19-fase-4-perfil-google-recompensas-companeros.md).
 - **Fase 3 completa (18 oct, sin commit): el agente más a fondo.**
   - **Temas y puntos débiles:** cada pregunta puede tener un tema (hasta 60
     caracteres; el escriba lo propone reutilizando los de la materia, o se
@@ -294,17 +329,21 @@ migraciones, y el schema lo avisa con un comentario.
 
 | Tabla | Qué guarda | Relaciones |
 |---|---|---|
-| `User` | Usuario y su personaje: nivel, almas, llama, brasas (`embers`, 0–2, con un `CHECK` a mano), límite de correos | Tiene materias, vigilias, misiones, pruebas de redención, intentos, contraataques, invocaciones del escriba, sesiones y cuentas |
+| `User` | Usuario y su personaje: nivel, almas, llama, brasas (`embers`, 0–2, con un `CHECK` a mano), racha más larga (`bestFlame`), título equipado (`equippedRelic`), código de amigo (`friendCode`, único, con `CHECK` de formato), `showStats`, límite de correos y de solicitudes de compañero (`friendRequestDay`, `friendRequestCount`) | Tiene materias, vigilias, misiones, pruebas de redención, intentos, contraataques, invocaciones del escriba, bendiciones, ofertas, reliquias, compañeros, sesiones y cuentas |
 | `Subject` | Materia ("Cálculo") | De un `User`. Tiene jefes (`Task`) y preguntas (`Question`) |
 | `Task` | Jefe: vida, dificultad, fecha de entrega, estado, `bossKey` | De una `Subject` (no tiene `userId`: se filtra por la materia) |
 | `StudySession` | Vigilia de 25 min y sus almas | De una `Task` y de un `User`. Una sola abierta por usuario (índice parcial) |
 | `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo, `rule` (`LEGACY` / `FEW_QUESTIONS` / `TRIAL`, fijada al caer), `vigilsDone` y `trialsUsed` (intentos = `vigilsDone − trialsUsed`) | De un `User` y una `Task` (la materia de la prueba es la de la tarea). Una sola `ACTIVE` por usuario (índice parcial). `CHECK` a mano: `trialsUsed` entre 0 y `vigilsDone` |
-| `RedemptionTrial` | Un intento de la prueba de redención: `items` (`jsonb`, el formato del contraataque y, en las contestadas, `correct`), `answered`, `correctCount`, `passed` (`null` = en curso), `finishedAt` | De una `RedemptionMission` y un `User` (`Cascade`). Una sola abierta por misión (índice único parcial) |
+| `RedemptionTrial` | Un intento de la prueba de redención: `items` (`jsonb`, el formato del contraataque y, en las contestadas, `correct`), `answered`, `correctCount`, `passed` (`null` = en curso), `finishedAt`, `passWith` (4, o 3 con el Sello) | De una `RedemptionMission` y un `User` (`Cascade`). Una sola abierta por misión (índice único parcial) |
 | `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation`, `sealed` (del escriba y aún sin contestar), `reviewLevel` (0–5), `reviewDueAt` (cuándo vuelve; `null` = nueva) y `topic` (tema, opcional, hasta 60) | De una `Subject` (`Cascade`). Cinco `CHECK` a mano (el cuarto: solo las `AGENT` pueden estar selladas; el quinto: `reviewLevel` entre 0 y 5) |
 | `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque o en una prueba de redención (`studySessionId` `null` y `soulsDelta` 0): `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta` (las aplicadas). La escribe `responderPreguntaDe` (`chosenIndex` en el orden ORIGINAL de la pregunta); las genéricas no | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
-| `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, `order` = permutación de sus opciones y, solo si es de repaso, `review: true`), `answered`, `correctCount`, `soulsDelta`, `finishedAt`, `bossDifficulty` (la del jefe al crearlo; decide la brasa; `null` = de antes de la brasa) | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
+| `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, `order` = permutación de sus opciones y, solo si es de repaso, `review: true`), `answered`, `correctCount`, `soulsDelta`, `finishedAt`, `bossDifficulty` (la del jefe al crearlo; decide la brasa; `null` = de antes de la brasa), `bonusPerCorrect` (la Lucidez: almas extra por acierto). En `items`, `struck` = la opción mostrada que tachó el Ojo del escriba | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
 | `AgentInvocation` | Cada invocación del escriba: `status` (`PENDING` / `OK` / `FAILED`), `inputKind` (`TEXT` / `PDF` / `REINFORCE`), `questionsCreated`, `createdAt`, `finishedAt`. Para el límite diario. **No guarda los apuntes, ni el PDF, ni el nombre del archivo** | De un `User` y una `Subject` (`Cascade`) |
-| `Session`, `Account`, `Verification` | Tablas de Better Auth (sesiones, contraseña, enlaces de verificación) | `Session` y `Account` de un `User` |
+| `Blessing` | Bendición activa (`key`, `usesLeft` ≥ 1). Se borra al gastar el último uso | De un `User` (`Cascade`). Única por `(userId, key)` |
+| `BlessingOffer` | Oferta de bendiciones de un jefe vencido: `options` (1 a 3), `chosenKey`, `chosenAt`, `expiresAt` (7 días) | De un `User` y una `Task` (`Cascade`). `taskId` único |
+| `Relic` | Reliquia conseguida (`key`: `boss:<jefe>` o `flame:<días>`), `earnedAt` | De un `User` (`Cascade`). Única por `(userId, key)` |
+| `Friendship` | Pareja de compañeros: `requesterId`, `addresseeId`, `status` (`PENDING` / `ACCEPTED` / `DECLINED` = lápida), `hiddenByRequester`, `respondedAt` | De dos `User` (`Cascade`). Índice único sobre la pareja ordenada y `CHECK` de no ser uno mismo |
+| `Session`, `Account`, `Verification` | Tablas de Better Auth (sesiones, contraseña y Google, enlaces de restablecimiento). `Verification` no tiene clave foránea: al borrar una cuenta se limpia a mano | `Session` y `Account` de un `User` |
 
 Las preguntas genéricas de autoevaluación **no están en la base**: viven en
 `lib/questions/generic.ts`.
@@ -337,18 +376,20 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
    | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Opcionales: la cuenta de Gmail que envía los correos y su contraseña de aplicación. Vacías, el correo (con el enlace) sale en la consola de `npm run dev` |
    | `GEMINI_API_KEY`, `GEMINI_MODEL` | El escriba: la clave de Google AI Studio (secreta) y el nombre del modelo de Gemini. Vacías, la tarjeta dice «El escriba no está disponible» |
    | `GEMINI_MODEL_FALLBACK` | Opcional: modelo de reserva. Si el principal da 503 o no responde en 25 s, se prueba este (dentro de los mismos 45 s). Vacía = sin reserva |
+   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Opcionales: el cliente OAuth de Google Cloud (el secreto, secreto). Con las dos, sale «Continuar con Google». URI de redirección autorizada: `http://localhost:3000/api/auth/callback/google` (y la de producción) |
    | `EMBER_FAKE_AGENT` | Opcional, **solo en local**: con `1`, el escriba devuelve preguntas de ejemplo sin llamar a Google. Se ignora en producción. **Nunca se configura en Vercel** |
 
 5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
    equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
    descarga la imagen. `docker compose ps` debe decir `healthy`.
-6. `npx prisma migrate deploy` crea las tablas aplicando las 16 migraciones.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 17 migraciones.
 7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
    `prueba1234`** (de desarrollo, no protege nada real) con 2 materias (10
    preguntas con tema y 25 respuestas en Cálculo, para ver los Puntos débiles;
    Historia sin preguntas), 5 jefes en varios estados (uno ya caído, con una
-   misión de redención con prueba y 1 intento), almas, llama y una brasa, y
-   con el correo ya verificado. Se puede repetir: rehace la
+   misión de redención con prueba y 1 intento), almas, llama y una brasa, su
+   código de amigo, la reliquia de su jefe vencido, la Bendición de las almas
+   (2 usos) y una recompensa sin reclamar, y con el correo ya verificado. Se puede repetir: rehace la
    cuenta. Para comprobar el banco de preguntas:
    `node --env-file=.env --import ./scripts/alias-hooks.mjs scripts/probar-preguntas.ts`
    (tiene que terminar en "Todo bien."); el contraataque, igual con
@@ -361,7 +402,12 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
    (`texto`, `pdf` o `refuerzo`). La Fase 3, con `EMBER_FAKE_AGENT=1`:
    `scripts/probar-temas.ts`, `scripts/probar-refuerzo.ts` y
    `scripts/probar-redencion.ts` (los de temas y redención admiten
-   `--payload` con `npm run dev` encendido).
+   `--payload` con `npm run dev` encendido). La Fase 4: `scripts/probar-perfil.ts`
+   (con `EMBER_FAKE_AGENT=1`), `scripts/probar-google.ts` (con `--accion`, el
+   servidor tiene que tener las variables de Google, aunque sean de mentira),
+   `scripts/probar-recompensas.ts` y `scripts/probar-companeros.ts` (los dos
+   con `--payload`). `probar-preguntas` usa la cuenta del seed: si falla
+   después de otros scripts, `npm run db:seed` y otra vez.
 8. `npm run dev` y abrir http://localhost:3000/login. Si con las variables de
    Gmail rellenas sale "unable to verify the first certificate", es un
    antivirus que intercepta el correo (en el portátil de Luis, Norton):
@@ -624,8 +670,15 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   de `serverNow`, y nunca calcula la duración (la recibe como prop). Las
   acciones reciben solo el id de la tarea.
 - **En una transacción con bloqueos, todo bloquea en el mismo orden: tarea
-  → vigilia → contraataque / prueba → usuario → misión → pregunta** (todos
-  los caminos, uno por uno, en el comentario de `lib/locks.ts`). Empezar la
+  → vigilia → contraataque / prueba → usuario → misión → [filas propias:
+  oferta, bendiciones, reliquias] → pregunta** (todos los caminos, uno por
+  uno, en el comentario de `lib/locks.ts`). Las filas propias del usuario
+  (`BlessingOffer`, `Blessing`, `Relic`, `User.equippedRelic`) no se bloquean
+  una a una: **se tocan siempre con el usuario ya bloqueado**. Crear el
+  contraataque es ahora su propia transacción: usuario → (crea la fila,
+  nueva) → bendiciones. Compañeros: los dos usuarios en orden de id → la
+  amistad, nunca dentro de la batalla. Borrar la cuenta va al revés que el
+  golpe (usuario → cascada → tareas): ante un `40P01` se reintenta una vez. Empezar la
   prueba de redención: usuario → misión (y crea la fila de la prueba);
   contestarla: prueba → usuario → misión → pregunta. La revisión de jefes
   vencidos **no toca las pruebas** (una abierta de una misión resuelta se
@@ -871,10 +924,88 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - **Next.js 16 tiene cambios grandes** respecto a versiones anteriores: antes
   de escribir código, leer la guía en `node_modules/next/dist/docs/` (ver
   `AGENTS.md`).
+- **Rutas de Better Auth 1.7.7.** Activas: `/sign-up/email`, `/sign-in/email`,
+  `/sign-in/social` (la redirección a Google; con `idToken`, desactivada por
+  `disableIdTokenSignIn`), `/callback/:id`, `/sign-out`, `/get-session`,
+  `/send-verification-email`, `/verify-email`, `/request-password-reset`,
+  `/reset-password`, `/reset-password/:token`, `/change-password`,
+  `/list-sessions`, `/revoke-session`, `/revoke-sessions`,
+  `/revoke-other-sessions`, `/update-session`, `/list-accounts`,
+  `/link-social`, `/unlink-account`, `/account-info`, `/get-access-token`,
+  `/refresh-token` (sin tokens guardados, no dan nada), `/ok` y `/error`.
+  Solo de servidor (sin ruta pública): `setPassword` y `verifyPassword`.
+  **Desactivadas** (`disabledPaths`, 404): `/update-user` (pondría cualquier
+  nombre y cualquier foto) y `/delete-user` y `/delete-user/callback`
+  (borrarían sin «BORRAR» ni contraseña; además `user.deleteUser` no se
+  activa). `/change-email` está apagada por defecto. Ningún cliente usa
+  `authClient` (no existe en el proyecto): todo va por Server Actions.
+- **El nombre de vigilante se valida en las acciones, no en el hook de Better
+  Auth** (`checkVigilanteName`, 2–40 caracteres normalizados). El hook solo lo
+  ajusta (`fitVigilanteName`): rechazarlo ahí delataría qué correos existen.
+- **Google: `trustedProviders` vacío y `requireLocalEmailVerified`.** Solo se
+  vincula con los dos correos verificados. El mensaje de «no se vincula»
+  (`lib/google-errors.ts`) lleva a «Olvidé mi contraseña», **nunca** a
+  «verifica tu correo» (verificar le daría la cuenta a un atacante con
+  secuestro previo). Una cuenta nueva con Google exige `email_verified`.
+- **No se guardan los tokens de Google** (hook `account.create.before` y
+  `updateAccountOnSignIn: false`), y vincular no cambia el nombre ni la foto.
+- **La foto de Google se pinta con `unoptimized` y `referrerPolicy="no-referrer"`**
+  (tarjeta del personaje) y **nunca se enseña a los compañeros**.
+- **Better Auth descarta los campos de `User` que no conoce:** lo que un hook
+  añada al crear (como `friendCode`) se declara en `additionalFields` con
+  `input: false`.
+- **Borrar la cuenta es la acción de `/perfil`** (`deleteAccountOf`): «BORRAR»
+  exacto, la contraseña (o sesión de menos de 24 h si no tiene), `Verification`
+  a mano y el `User` en cascada. **Toda tabla nueva** con datos del usuario
+  necesita `ON DELETE CASCADE` y entrar en `TABLAS_CONOCIDAS` de
+  `scripts/probar-perfil.ts` (si no, la prueba falla).
+- **Las recompensas nunca son un atajo para no estudiar**: ninguna acorta la
+  vigilia, quita vida ni da golpes. Sus reglas solo viven en `lib/game.ts`
+  (`BLESSINGS`, `BLESSING_RULES`, `RELICS` y sus funciones) y se **gastan en la
+  misma transacción que las usa**: Almas en el golpe, Escudo en la respuesta,
+  Lucidez y Ojo al crear el contraataque, Sello al empezar la prueba, Chispa
+  al elegir.
+- **La oferta la fija el servidor en la victoria** (una por jefe, `taskId`
+  único) y elegir se valida contra ella (`elegirBendicionDe`): propia, ofrecida,
+  sin elegir, sin caducar y todavía útil.
+- **Ojo del escriba: al navegador solo va `struck`** (la opción tachada), nunca
+  la correcta. La respuesta rechaza la tachada en el servidor.
+- **Las reliquias se dan una vez** (`createManyAndReturn` + `skipDuplicates` +
+  índice único) con `earnedAt` = el instante del golpe, que la victoria usa
+  para saber cuál enseñar.
+- **Compañeros: las acciones reciben el id de la amistad, nunca el de otro
+  usuario**, y la página no lleva correos ni ids ajenos (lo comprueba
+  `probar-companeros --payload`). Lo que depende del otro responde el mismo
+  mensaje genérico; el límite de 20 intentos al día (existan o no los códigos)
+  es la defensa contra probar códigos. Rechazar deja una lápida.
+- **La semana de la clasificación es de lunes 00:00 a lunes 00:00 de Bogotá**
+  (`weekInAppTimeZone`), como instantes (se compara con `completedAt`).
+- **El código de amigo usa el alfabeto de 32 símbolos de `FRIEND_CODE`**
+  (igual en el `CHECK` y en la migración: no cambiarlo). Los nuevos, con
+  `node:crypto`; en SQL, solo los bytes enteramente aleatorios del UUID.
+- **Los scripts que importan `lib/auth.ts` necesitan que `alias-hooks.mjs`
+  resuelva `next/server`** (ya lo hace).
 - **Cada sesión se documenta en `docs/sesiones/`** con el skill
   `documentar-sesion`. Los commits los hace Luis a mano.
 
 ## Pendientes
+
+- [ ] **Desplegar `20261019120000_fase4`** (solo aditiva) y crear en Vercel
+  (*Production*) `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`, con la URI de
+  redirección de producción añadida en Google Cloud (y la pantalla de
+  consentimiento publicada, o solo entrarán los usuarios de prueba). Después,
+  probar en producción el perfil, Google, las recompensas y los compañeros.
+- [ ] Probar la foto de Google con una cuenta **creada** con Google (la de
+  Luis ya existía: vincular no cambia la foto).
+- [ ] Un *Instant Rollback* tras desplegar la Fase 4: el código viejo ignora
+  las bendiciones (ni se gastan ni actúan) y crea usuarios sin código de
+  amigo (se les da al abrir `/companeros`).
+- [ ] Las ofertas caducadas se quedan como filas (inofensivas). Limpiarlas si
+  molestan.
+- [ ] Compañeros: no hay bloqueo de usuarios ni tope de solicitudes recibidas.
+- [ ] `probar-preguntas` depende de la cuenta del seed (otros scripts le dejan
+  preguntas del escriba). Hacer que cree sus propios datos.
+- [ ] Fase 4: lector de pantalla real, Safari y Firefox.
 
 - [ ] **Elegir y probar un modelo de reserva real** (`GEMINI_MODEL_FALLBACK`):
   solo se probó con el `fetch` falso.
@@ -914,15 +1045,12 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   `User.emberSavedDay`). Hoy solo sale justo después del golpe.
 - [ ] Confirmar que llegó a Gmail el correo «Crea una contraseña nueva para
   Ember» enviado en local a `lemeza364+prueba2@gmail.com` (14 oct).
-- [ ] **Nombre heredado del secuestro previo:** tras restablecer, la cuenta
-  conserva el nombre de vigilante que puso quien la registró, y hoy no se
-  puede editar. Se resuelve cuando exista editar el perfil.
+- [x] ~~**Nombre heredado del secuestro previo**~~ (19 oct): el nombre se
+  cambia en `/perfil`.
 - [ ] Probar «olvidé mi contraseña» y el ojo con lector de pantalla, en
   Safari y Firefox y con gestores de contraseñas; y en producción después
   del push.
-- [ ] Corregir el comentario de `Verification.value` en el schema la próxima
-  vez que cambie: en el restablecimiento el token va en `identifier` y el id
-  del usuario en `value`.
+- [x] ~~Corregir el comentario de `Verification.value` en el schema~~ (19 oct).
 - [ ] **Después del push:** mirar en el log del build que se aplica
   `20261010214056_limite_correos_auth` (la primera migración que aplica el
   build de verdad) y probar en producción el registro, el correo (enviado
@@ -981,8 +1109,8 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   (el cambio de día lo cubren las pruebas de las funciones puras).
 - [ ] Probar almas, niveles y el bloque del personaje en Vercel, con lector
   de pantalla, con movimiento reducido real y en Safari y Firefox.
-- [ ] Cuando llegue el inicio de sesión con Google, comprobar el avatar con
-  una foto real de otro dominio (`next/image` con `unoptimized`).
+- [ ] Comprobar el avatar con una foto real de Google (ya va con
+  `unoptimized` y `no-referrer`; ver el pendiente de la Fase 4).
 - [ ] Probar la batalla en Vercel y medir allí la latencia (desde este
   equipo contra Supabase cada acción tardaba ~3 s; contra la base local,
   ~0,2 s en `next dev` y ~0,05 s en `next start`), con lector de pantalla,
@@ -996,11 +1124,11 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - [ ] Probar `/materias` y `/mazmorra/invocar` en producción.
 - [ ] Zona horaria por usuario, si llega a haber usuarios fuera de Colombia
   (hoy es la constante `APP_TIME_ZONE`).
-- [ ] **Validar el nombre del registro en el servidor** con `normalizeName()`:
-  hoy se acepta vacío o solo con espacios (Better Auth admite `""`).
+- [x] ~~**Validar el nombre del registro en el servidor**~~ (19 oct): la
+  acción lo valida (2–40) y el hook de Better Auth lo ajusta.
 - [ ] Probar en producción `/login` y `/registro` rediseñados, y con un
   lector de pantalla.
-- [ ] Inicio de sesión con Google.
+- [x] ~~Inicio de sesión con Google~~ (19 oct, en local; falta producción).
 - [ ] 8 vulnerabilidades altas de `npm audit` (vía `eslint-config-next` y
   `prisma`), anteriores a esta sesión. No usar `audit fix --force`: cambia
   Prisma.
@@ -1148,4 +1276,5 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-12 | Fase 2 · paso 4: las preguntas que vuelven (repetición espaciada tipo Leitner, días de calendario de Bogotá, migración con relleno en SQL comprobado contra `nextReview`, reserva para nuevas, `FOR UPDATE` del nivel, «Repaso» y estados del banco) | [2026-10-12-preguntas-que-vuelven.md](sesiones/2026-10-12-preguntas-que-vuelven.md) |
 | 2026-10-18 | Fase 3 completa: temas y puntos débiles (`Question.topic`, `GROUP BY` y `groupBy`, umbrales), refuerzo dirigido desde las falladas sin guardar apuntes, prueba de redención (`RedemptionTrial`, `RedemptionMission.rule` con `LEGACY` por compatibilidad, un intento por vigilia, 4 de 5), `lib/locks.ts` y el interbloqueo por la clave foránea | [2026-10-18-fase-3-el-agente.md](sesiones/2026-10-18-fase-3-el-agente.md) |
 | 2026-10-18 | Modelo de reserva para Gemini (`GEMINI_MODEL_FALLBACK`): 503 o timeout del primer intento (25 s) → segundo modelo dentro de los 45 s; 429 y 4xx no; `AbortController` por intento; 20 comprobaciones nuevas con `fetch` falso | [2026-10-18-modelo-de-reserva-gemini.md](sesiones/2026-10-18-modelo-de-reserva-gemini.md) |
+| 2026-10-19 | Fase 4: perfil (nombre, contraseña, hazañas, borrar la cuenta en cascada con reintento ante `40P01`), Google (OAuth con PKCE, vinculación solo con correos verificados, sin tokens, `disabledPaths`), recompensas (6 bendiciones con oferta fijada en el servidor y pesos exactos, 9 reliquias y títulos, gasto en la transacción que las usa) y compañeros (código con `node:crypto` y relleno SQL sin bits fijos, lápida, límite diario, clasificación semanal de Bogotá, privacidad) | [2026-10-19-fase-4-perfil-google-recompensas-companeros.md](sesiones/2026-10-19-fase-4-perfil-google-recompensas-companeros.md) |
 | 2026-10-17 | Landing de la Fase 2: textos auditados ("Estudia. Golpea. Conquista."), cabecera fija, jefes y brasas en el hero, islas `Reveal` (IntersectionObserver) y `VigilClock`, bestiario, sección El escriba, máscaras de degradado, rejilla de dos columnas, "Pausar animaciones" (`@custom-variant`, `localStorage`), `scripts/capturas-landing.mjs` (CDP) | [2026-10-17-landing-fase-2.md](sesiones/2026-10-17-landing-fase-2.md) |

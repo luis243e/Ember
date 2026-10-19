@@ -2,7 +2,9 @@ import Link from "next/link";
 import type { ComponentProps } from "react";
 import { cn } from "@/lib/cn";
 
-type ButtonVariant = "primary" | "ghost";
+// danger: acciones que no se deshacen (borrar la cuenta). El rojo (blood) va
+// en el borde y el fondo, como Alert: como color de texto no tiene contraste.
+type ButtonVariant = "primary" | "ghost" | "danger";
 // sm = 44 px (barra de navegación), md = 48 px (junto a un campo, que también
 // mide 48), lg = 56 px (hero, llamada final y envío de formularios).
 type ButtonSize = "sm" | "md" | "lg";
@@ -18,6 +20,7 @@ const BASE =
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-gold text-night hover:bg-gold-bright",
   ghost: "border border-line bg-surface text-parchment hover:border-gold",
+  danger: "border border-blood bg-blood/16 text-parchment hover:bg-blood/30",
 };
 
 const SIZES: Record<ButtonSize, string> = {

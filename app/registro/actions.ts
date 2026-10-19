@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { isAPIError } from "better-auth/api";
 import { auth } from "@/lib/auth";
 import { authErrorMessage } from "@/lib/auth-errors";
+import { checkVigilanteName } from "@/lib/profile-rules";
 
 // Lo que la acción devuelve al formulario: un mensaje de error o nada.
 export type EstadoFormulario = { error: string | null };
@@ -23,9 +24,17 @@ export async function registrarse(
   _estadoAnterior: EstadoRegistro,
   formData: FormData,
 ): Promise<EstadoRegistro> {
-  const name = String(formData.get("name") ?? "");
+  const rawName = String(formData.get("name") ?? "");
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
+
+  // El nombre se valida ANTES de llamar a Better Auth, con la regla del
+  // perfil: así un nombre inválido da el mismo error exista o no el correo
+  // (Better Auth no crea nada con un correo existente, y el hook de
+  // lib/auth.ts solo ajusta el nombre, nunca lo rechaza).
+  const check = checkVigilanteName(rawName);
+  if (!check.ok) return { error: check.error, valores: { name: rawName, email }, enviadoA: null };
+  const name = check.name;
 
   try {
     // Crea el User (sin verificar) y su Account "credential" con la

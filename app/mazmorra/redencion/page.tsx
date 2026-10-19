@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/session";
+import { preloadCharacter } from "@/lib/rewards";
 import { loadRedemption } from "@/lib/redemption";
 import { loadOpenTrial, loadTrialStatus } from "@/lib/redemption-trial";
 import { REDEMPTION } from "@/lib/game";
@@ -17,6 +18,9 @@ export const metadata: Metadata = {
 // enseñando el resumen mientras la página se repinta sin misión.
 export default async function RedencionPage() {
   const sessionUser = await requireUser();
+  // Las bendiciones de la tarjeta del personaje, en paralelo con lo demás
+  // (AppShell recoge el resultado).
+  preloadCharacter(sessionUser.id);
 
   // La revisión de jefes vencidos (puede vencer la misión) y el estado de la
   // misión, en paralelo. Si la revisión cambió algo, el estado se vuelve a

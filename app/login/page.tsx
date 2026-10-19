@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { AuthLayout } from "@/components/auth/auth-layout";
+import { GoogleButton } from "@/components/auth/google-button";
+import { googleEnabled } from "@/lib/auth";
+import { googleErrorKind } from "@/lib/google-errors";
 import { LoginForm, type AvisoLogin } from "./login-form";
 
 export const metadata: Metadata = {
@@ -16,13 +19,18 @@ function parseAviso(value: string | string[] | undefined): AvisoLogin | null {
   return AVISOS.find((aviso) => aviso === value) ?? null;
 }
 
-// Solo el formulario es componente de cliente.
+// Solo los formularios son componentes de cliente. ?error= lo pone Better
+// Auth al volver de Google sin sesión: también se compara con una lista de
+// códigos conocidos (googleErrorKind) y el texto vive en el código.
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { aviso } = await searchParams;
+  const { aviso, error } = await searchParams;
 
   return (
     <AuthLayout page="login">
-      <LoginForm aviso={parseAviso(aviso)} />
+      <div className="flex flex-col gap-5 md:gap-6">
+        <LoginForm aviso={parseAviso(aviso)} googleError={googleErrorKind(error)} />
+        {googleEnabled && <GoogleButton />}
+      </div>
     </AuthLayout>
   );
 }

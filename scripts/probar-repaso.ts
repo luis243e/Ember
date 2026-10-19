@@ -470,7 +470,8 @@ async function probarConBase(userId: string): Promise<void> {
   // Aunque items dijera review: true (dato tocado a mano), una sellada no.
   const pubSellada = publicQuestion(resolved, { ref: nuevaSellada.id, order: [0, 1, 2, 3], review: true });
   check("publicQuestion de una sellada: review false aunque items diga true", pubSellada.review === false);
-  check("publicQuestion solo lleva kind, fromAgent, review, prompt y options", same(Object.keys(pubSellada).sort(), ["fromAgent", "kind", "options", "prompt", "review"]));
+  // struck: la tachada por el Ojo del escriba (Fase 4), aquí null.
+  check("publicQuestion solo lleva kind, fromAgent, review, prompt, options y struck", same(Object.keys(pubSellada).sort(), ["fromAgent", "kind", "options", "prompt", "review", "struck"]) && pubSellada.struck === null);
   const deProveedor = (await preguntasParaContraataque(userId, materia.id, 10)).find((q) => q.id === nuevaSellada.id);
   check("el proveedor da review false a una sellada", deProveedor?.review === false);
   // El banco pide las selladas sin columnas de repaso: ni se leen.

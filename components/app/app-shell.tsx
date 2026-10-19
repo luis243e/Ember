@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, BookOpen, LogOut, Swords, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BookOpen, LogOut, Swords, UserRound, Users, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cerrarSesion } from "@/app/mazmorra/actions";
 import { CharacterCard, type CharacterUser } from "@/components/app/character-card";
@@ -10,13 +10,19 @@ import { cn } from "@/lib/cn";
 import { todayInAppTimeZone } from "@/lib/dates";
 import { flameState } from "@/lib/game";
 import type { RedemptionNotice as RedemptionNoticeData } from "@/lib/redemption";
+import { loadCharacterExtras, titleOf } from "@/lib/rewards";
 
-type AppSection = "mazmorra" | "materias";
+type AppSection = "mazmorra" | "materias" | "companeros" | "perfil";
 
 // Solo lo que existe hoy. /mazmorra/invocar cuenta como "mazmorra".
-const NAV: { section: AppSection; href: string; label: string; icon: LucideIcon }[] = [
-  { section: "mazmorra", href: "/mazmorra", label: "Mi mazmorra", icon: Swords },
-  { section: "materias", href: "/materias", label: "Materias", icon: BookOpen },
+// mobile: también en las pestañas de móvil. A 320 px no caben más de tres;
+// el perfil se abre allí desde la tarjeta del personaje, que en móvil está
+// justo debajo de las pestañas.
+const NAV: { section: AppSection; href: string; label: string; icon: LucideIcon; mobile: boolean }[] = [
+  { section: "mazmorra", href: "/mazmorra", label: "Mi mazmorra", icon: Swords, mobile: true },
+  { section: "materias", href: "/materias", label: "Materias", icon: BookOpen, mobile: true },
+  { section: "companeros", href: "/companeros", label: "Compañeros", icon: Users, mobile: true },
+  { section: "perfil", href: "/perfil", label: "Perfil", icon: UserRound, mobile: false },
 ];
 
 // El mismo contorno de foco que los botones (buttonStyles).
@@ -29,7 +35,13 @@ type AppShellProps = {
   // El usuario de requireUser(): nombre, foto y almas del bloque del
   // personaje, y la racha guardada con el día del último golpe y las brasas
   // para la llama.
-  user: CharacterUser & { flame: number; lastStrikeDay?: Date | null; embers: number };
+  user: CharacterUser & {
+    id: string;
+    flame: number;
+    lastStrikeDay?: Date | null;
+    embers: number;
+    equippedRelic?: string | null;
+  };
   // Cabecera de la página: título (h1) y subtítulo.
   title: string;
   description: string;
@@ -46,7 +58,10 @@ type AppShellProps = {
 // móvil. NO comprueba la sesión: cada página llama antes a requireUser() y le
 // pasa el usuario. El bloque del personaje ("ALMAS Y NIVELES") va bajo el
 // logo en la barra lateral y bajo las pestañas en móvil.
-export function AppShell({
+// Es async: espera las bendiciones activas de la tarjeta (loadCharacterExtras,
+// con cache()). Cada página empieza esa lectura al principio
+// (preloadCharacter), así que aquí suele estar ya resuelta.
+export async function AppShell({
   active,
   user,
   title,
@@ -60,6 +75,8 @@ export function AppShell({
   // golpear, con la misma regla (flameAfterStrike).
   const flame = flameState(user.flame, user.lastStrikeDay ?? null, todayInAppTimeZone(), user.embers);
   const flameNotice = flame.extinguished || flame.status === "protected";
+  const { blessings } = await loadCharacterExtras(user.id);
+  const character = { flame, blessings, title: titleOf(user.equippedRelic) };
 
   return (
     <div className="flex flex-1 flex-col md:flex-row">
@@ -68,7 +85,7 @@ export function AppShell({
       <header className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col justify-between border-r border-line bg-night-alt px-4 pt-7 pb-5 md:flex">
         <div className="flex flex-col gap-8">
           <Logo className="ml-3 self-start text-2xl tracking-[4px]" />
-          <CharacterCard user={user} flame={flame} />
+          <CharacterCard user={user} {...character} />
           <nav aria-label="Principal" className="flex flex-col gap-1">
             {NAV.map(({ section, href, label, icon: Icon }) => {
               const isActive = section === active;
@@ -126,8 +143,10 @@ export function AppShell({
             </button>
           </form>
         </div>
-        <nav aria-label="Principal" className="flex h-11 gap-6 border-b border-line px-4">
-          {NAV.map(({ section, href, label }) => {
+        {/* Tres pestañas: a 320 px caben con 16 px entre ellas y sin partir
+            el texto (whitespace-nowrap); desde sm, con más aire. */}
+        <nav aria-label="Principal" className="flex h-11 gap-4 border-b border-line px-4 sm:gap-6">
+          {NAV.filter((item) => item.mobile).map(({ section, href, label }) => {
             const isActive = section === active;
             return (
               <Link
@@ -135,7 +154,7 @@ export function AppShell({
                 href={href}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex items-center border-b-2 text-sm leading-[normal] transition-colors",
+                  "flex items-center border-b-2 text-sm leading-[normal] whitespace-nowrap transition-colors",
                   FOCUS_RING,
                   isActive
                     ? "border-gold-bright font-semibold text-gold-bright"
@@ -152,7 +171,7 @@ export function AppShell({
       {/* Móvil: el bloque del personaje, debajo de las pestañas y ya sobre
           el fondo de la página. */}
       <div className="px-4 pt-4 md:hidden">
-        <CharacterCard user={user} flame={flame} />
+        <CharacterCard user={user} {...character} />
       </div>
 
       {/* min-w-0: sin esto, un contenido muy ancho estiraría la columna y

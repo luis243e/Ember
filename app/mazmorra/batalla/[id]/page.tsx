@@ -5,7 +5,8 @@ import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { loadRedemption } from "@/lib/redemption";
-import { bossForTask, bossImageSrc, DIFFICULTY_LABELS, vigilDurationMs } from "@/lib/game";
+import { bossForTask, bossImageSrc, DIFFICULTY_LABELS, relicKeyForBoss, vigilDurationMs } from "@/lib/game";
+import { loadVictoryRewards } from "@/lib/rewards";
 import { parseItems, publicQuestion, resolveItem } from "@/lib/questions/counterattack";
 import { Batalla } from "./batalla";
 
@@ -66,7 +67,7 @@ async function loadBattle(task: OwnTask, userId: string) {
       ? prisma.studySession.findFirst({
           where: { taskId: task.id, completedAt: { not: null } },
           orderBy: { completedAt: "desc" },
-          select: { soulsEarned: true },
+          select: { soulsEarned: true, completedAt: true },
         })
       : null,
     // El contraataque sin terminar contra ESTE jefe, si lo hay: al recargar o
@@ -80,7 +81,14 @@ async function loadBattle(task: OwnTask, userId: string) {
 
   const boss = bossForTask(task);
   const isThisTask = openVigil?.taskId === task.id;
-  const counterattack = counter ? await loadCounterattack(counter) : null;
+  // El contraataque (si sigue vivo) o las recompensas de la victoria (si cayó):
+  // nunca los dos, así que siguen siendo una lectura más como mucho.
+  const [counterattack, victory] = await Promise.all([
+    counter ? loadCounterattack(counter) : null,
+    task.status === "DEFEATED"
+      ? loadVictoryRewards(userId, { id: task.id, relicKey: relicKeyForBoss(boss.key) }, finalStrike?.completedAt ?? null)
+      : null,
+  ]);
 
   return {
     task: {
@@ -113,6 +121,8 @@ async function loadBattle(task: OwnTask, userId: string) {
         ? { strikeSouls: finalStrike.soulsEarned, victorySouls: task.victorySouls }
         : null,
     counterattack,
+    // La oferta de bendiciones y la reliquia de la victoria (o null).
+    victory,
   };
 }
 

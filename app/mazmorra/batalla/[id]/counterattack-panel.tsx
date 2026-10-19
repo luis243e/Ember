@@ -115,7 +115,8 @@ export function CounterattackPanel({
     if (view !== "question" || !counterattack?.question) return;
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const n = Number(event.key);
-    if (Number.isInteger(n) && n >= 1 && n <= counterattack.question.options.length) {
+    // La tachada por el Ojo del escriba no tiene tecla.
+    if (Number.isInteger(n) && n >= 1 && n <= counterattack.question.options.length && n - 1 !== counterattack.question.struck) {
       event.preventDefault();
       answer(n - 1);
     }
@@ -191,11 +192,11 @@ export function CounterattackPanel({
                     correctIndex={revealed.result.correctIndex}
                     explanation={revealed.result.explanation}
                     verdict={VERDICTS[revealed.result.outcome]}
-                    optionNote={soulsLabel(revealed.result.soulsDelta, revealed.result.protectedByLevel)}
+                    optionNote={soulsNote(revealed.result)}
                     dodgeNote={
                       revealed.result.outcome === "skipped"
                         ? "No cuenta: 0 almas."
-                        : `${soulsLabel(revealed.result.soulsDelta, revealed.result.protectedByLevel)}. Esquivar ni da ni quita.`
+                        : `${soulsNote(revealed.result)}. Esquivar ni da ni quita.`
                     }
                     newLevel={revealed.result.newLevel}
                     explanationRef={explanationRef}
@@ -489,9 +490,19 @@ function soulsLabel(delta: number, protectedByLevel: boolean): string {
   return protectedByLevel ? `${text} · tu nivel te protege` : text;
 }
 
+// Las almas de una respuesta, con lo que hicieron las bendiciones: el Escudo
+// de ceniza (la respuesta restaba y no restó) o la Bendición de la lucidez
+// (las extra del acierto). Se anuncian donde actúan.
+function soulsNote(result: Answered): string {
+  const souls = soulsLabel(result.soulsDelta, result.protectedByLevel);
+  if (result.shielded) return `${souls} · El Escudo de ceniza te protege`;
+  if (result.lucidityBonus) return `${souls} · +${result.lucidityBonus} por la Bendición de la lucidez`;
+  return souls;
+}
+
 // Lo que oye el lector de pantalla al contestar.
 function resultSentence(result: Answered): string {
-  const souls = soulsLabel(result.soulsDelta, result.protectedByLevel);
+  const souls = soulsNote(result);
   const level = result.newLevel ? ` Has alcanzado el nivel ${result.newLevel}.` : "";
   const correct =
     result.correctIndex !== null ? ` La correcta era la ${LETTERS[result.correctIndex]}.` : "";

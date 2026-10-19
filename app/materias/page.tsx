@@ -3,6 +3,7 @@ import Link from "next/link";
 import { BookOpen, ChevronRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { preloadCharacter } from "@/lib/rewards";
 import { loadRedemption } from "@/lib/redemption";
 import { AppShell } from "@/components/app/app-shell";
 import { cardStyles } from "@/components/ui/card";
@@ -17,6 +18,9 @@ export const metadata: Metadata = {
 
 export default async function MateriasPage() {
   const sessionUser = await requireUser();
+  // Las bendiciones de la tarjeta del personaje, en paralelo con lo demás
+  // (AppShell recoge el resultado).
+  preloadCharacter(sessionUser.id);
 
   // Solo las materias de este usuario, ordenadas por nombre.
   // En paralelo con la revisión de jefes vencidos y los avisos: las materias

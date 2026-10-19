@@ -8,6 +8,7 @@ import { buttonStyles } from "@/components/ui/button";
 import { PasswordField } from "@/components/ui/password-field";
 import { TextField } from "@/components/ui/text-field";
 import { cn } from "@/lib/cn";
+import { GOOGLE_ERRORS, GOOGLE_EXISTS_TEXT, type GoogleErrorKind } from "@/lib/google-errors";
 import { iniciarSesion } from "./actions";
 import type { EstadoAcceso } from "@/app/registro/actions";
 
@@ -25,7 +26,14 @@ const AVISOS: Record<AvisoLogin, { text: string; icon?: LucideIcon }> = {
   contrasena: { text: "Contraseña cambiada. Ya puedes entrar.", icon: KeyRound },
 };
 
-export function LoginForm({ aviso }: { aviso: AvisoLogin | null }) {
+export function LoginForm({
+  aviso,
+  googleError,
+}: {
+  aviso: AvisoLogin | null;
+  // Por qué la vuelta de Google no abrió sesión (lib/google-errors.ts).
+  googleError: GoogleErrorKind | null;
+}) {
   const [estado, accion, enviando] = useActionState(iniciarSesion, estadoInicial);
 
   // Tras un error, React vacía el formulario y lo rellena con los
@@ -64,8 +72,29 @@ export function LoginForm({ aviso }: { aviso: AvisoLogin | null }) {
       {/* Se oculta mientras se envía: al volver a aparecer, el lector de
           pantalla lo anuncia aunque el mensaje sea el mismo. */}
       {estado.error && !enviando && <Alert>{estado.error}</Alert>}
+      {/* Lo de Google, solo hasta el primer intento con correo. "exists"
+          lleva a restablecer la contraseña, NUNCA a verificar el correo (ver
+          lib/google-errors.ts). */}
+      {googleError && !estado.error && !enviando && (
+        <Alert>
+          {googleError === "exists" ? (
+            <>
+              {GOOGLE_EXISTS_TEXT.before}{" "}
+              <Link
+                href="/olvide-contrasena"
+                className="rounded-sm font-semibold text-gold-bright underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright"
+              >
+                {GOOGLE_EXISTS_TEXT.link}
+              </Link>
+              {GOOGLE_EXISTS_TEXT.after}
+            </>
+          ) : (
+            GOOGLE_ERRORS[googleError]
+          )}
+        </Alert>
+      )}
       {/* El aviso solo hasta el primer intento: después manda la respuesta. */}
-      {aviso && !estado.error && !enviando && (
+      {aviso && !googleError && !estado.error && !enviando && (
         <Alert tone="info" icon={AVISOS[aviso].icon}>
           {AVISOS[aviso].text}
         </Alert>

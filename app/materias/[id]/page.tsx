@@ -4,6 +4,7 @@ import { cache } from "react";
 import { Check, MessageCircleQuestion } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { preloadCharacter } from "@/lib/rewards";
 import { loadRedemption } from "@/lib/redemption";
 import { QUESTION_TYPE_LABELS, type QuestionDraft } from "@/lib/questions/validation";
 import { invocacionesRestantes } from "@/lib/agent/invocation";
@@ -38,6 +39,9 @@ const getSubject = cache((id: string, userId: string) =>
 
 export async function generateMetadata({ params }: PageProps<"/materias/[id]">): Promise<Metadata> {
   const user = await requireUser();
+  // Las bendiciones de la tarjeta del personaje, en paralelo con lo demás
+  // (AppShell recoge el resultado).
+  preloadCharacter(user.id);
   const { id } = await params;
   const subject = await getSubject(id, user.id);
   return { title: subject ? `${subject.name} · Materias · Ember` : "Materias · Ember" };

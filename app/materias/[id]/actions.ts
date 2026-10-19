@@ -176,6 +176,9 @@ export async function invocarEscriba(formData: FormData): Promise<ResultadoEscri
   if (!entrada.ok) return { ok: false, error: entrada.error, limit: false };
 
   const resultado = await invocarEscribaDe(user.id, subject.id, entrada.input);
+  // La cuenta se borró (en otra pestaña) mientras Gemini escribía: no queda
+  // nada que enseñar en esta página. A la landing, con el aviso del borrado.
+  if (!resultado.ok && resultado.gone) redirect("/?aviso=cuenta-borrada");
   // Con éxito, la lista (las selladas nuevas) y la cuota del día cambian.
   if (resultado.ok) revalidarMateria(subject.id);
   return resultado;

@@ -1,13 +1,17 @@
 // Datos de prueba para la base de DESARROLLO (Postgres de Docker).
 // Ejecutar:  npm run db:seed
 // Crea (o vuelve a crear) la cuenta prueba@ember.test con materias, preguntas,
-// jefes en varios estados, vigilias, almas, llama y una brasa. Se niega a correr contra cualquier
-// base que no esté en este equipo.
+// jefes en varios estados, vigilias, almas, llama y una brasa, y (Fase 4) su
+// código de amigo, una reliquia, una bendición activa y una recompensa sin
+// reclamar. Se niega a correr contra cualquier base que no esté en este equipo.
 import { randomUUID } from "node:crypto";
 import { PrismaClient, type Difficulty, type QuestionType, type TaskStatus } from "@prisma/client";
 import { hashPassword } from "better-auth/crypto";
 import {
+  blessingOfferExpiry,
+  bossForTask,
   BOSSES_BY_DIFFICULTY,
+  BLESSINGS,
   counterattackSouls,
   levelForSouls,
   maxHpFor,
@@ -15,7 +19,9 @@ import {
   nextReview,
   redemptionDeadline,
   redemptionRuleFor,
+  relicKeyForBoss,
 } from "@/lib/game";
+import { uniqueFriendCode } from "@/lib/friends";
 import { todayDateInAppTimeZone } from "@/lib/dates";
 import { TRUE_FALSE_OPTIONS } from "@/lib/questions/validation";
 import { assertLocalDatabase } from "@/scripts/local-only";
@@ -263,8 +269,13 @@ async function main(): Promise<void> {
         // Una brasa: se ve el chip bajo la llama, y la llama en peligro dice
         // que, si hoy no golpea, la brasa la protegerá.
         embers: 1,
+        // El código de amigo, como el de cualquier cuenta nueva.
+        friendCode: await uniqueFriendCode(tx),
       },
     });
+
+    // Una bendición activa (el chip «Almas ×2» en la tarjeta del personaje).
+    await tx.blessing.create({ data: { userId: user.id, key: "SOULS", usesLeft: BLESSINGS.SOULS.uses - 1 } });
 
     // La forma de entrar con correo y contraseña, como la crea Better Auth:
     // providerId "credential" y accountId igual al id del usuario.
@@ -365,12 +376,35 @@ async function main(): Promise<void> {
           },
         });
       }
+
+      // Lo que dejó su victoria (Fase 4), como lo deja lib/battle.ts: la
+      // reliquia de ese jefe (con la hora del golpe final) y la oferta de
+      // bendiciones, aún sin elegir: la mazmorra enseña «Tienes una
+      // recompensa sin reclamar».
+      if (seed.status === "DEFEATED") {
+        const finalStrike = seed.vigils[seed.vigils.length - 1].completedAt;
+        await tx.relic.create({
+          data: { userId: user.id, key: relicKeyForBoss(bossForTask(task).key), earnedAt: finalStrike },
+        });
+        await tx.blessingOffer.create({
+          data: {
+            userId: user.id,
+            taskId: task.id,
+            // Un jefe fácil ofrece las 3 comunes; la de las almas ya está
+            // activa, así que quedan 2.
+            options: ["ASH_SHIELD", "LUCIDITY"],
+            createdAt: finalStrike,
+            expiresAt: blessingOfferExpiry(finalStrike),
+          },
+        });
+      }
     }
   });
 
   console.log(`Seed listo: ${EMAIL} / ${PASSWORD}`);
   console.log(`  ${TASKS.length} jefes en 2 materias, ${SOULS} almas, llama 4 (en peligro) y 1 brasa.`);
   console.log(`  Misión de redención con prueba: ${SOULS_AT_STAKE} almas en juego y 1 intento.`);
+  console.log("  Código de amigo, una reliquia, la Bendición de las almas (2 usos) y una recompensa sin reclamar.");
   const answers = CALCULO_QUESTIONS.reduce((sum, question) => sum + question.answers.length, 0);
   console.log(
     `  ${CALCULO_QUESTIONS.length} preguntas en Cálculo con temas y ${answers} respuestas; Historia sin preguntas.`,

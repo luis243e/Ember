@@ -241,8 +241,10 @@ async function probarConBase(userId: string, otherUserId: string): Promise<void>
   }
   const pub = publicQuestion((await preguntaQueToca(ca1.id)).question, items1[0]);
   check(
-    "lo público solo lleva kind, fromAgent, review, prompt y options (ni id, ni correcta, ni explicación)",
-    same(Object.keys(pub).sort(), ["fromAgent", "kind", "options", "prompt", "review"]),
+    // struck (Fase 4): la opción que tachó el Ojo del escriba, o null. Nunca
+    // dice cuál es la correcta (probar-recompensas lo comprueba).
+    "lo público solo lleva kind, fromAgent, review, prompt, options y struck (ni id, ni correcta, ni explicación)",
+    same(Object.keys(pub).sort(), ["fromAgent", "kind", "options", "prompt", "review", "struck"]) && pub.struck === null,
     Object.keys(pub),
   );
 

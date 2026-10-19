@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { BookOpen } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { preloadCharacter } from "@/lib/rewards";
 import { loadRedemption } from "@/lib/redemption";
 import { todayInAppTimeZone } from "@/lib/dates";
 import { AppShell } from "@/components/app/app-shell";
@@ -17,6 +18,9 @@ export const metadata: Metadata = {
 
 export default async function InvocarPage() {
   const sessionUser = await requireUser();
+  // Las bendiciones de la tarjeta del personaje, en paralelo con lo demás
+  // (AppShell recoge el resultado).
+  preloadCharacter(sessionUser.id);
 
   // Solo las materias de este usuario: son las únicas que puede elegir.
   // En paralelo con la revisión de jefes vencidos y los avisos: las materias

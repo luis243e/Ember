@@ -4,6 +4,8 @@ import { refresh } from "next/cache";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { isBlessingKey } from "@/lib/game";
+import { elegirBendicionDe, type ResultadoEleccion } from "@/lib/rewards";
 import {
   asestarGolpeDe,
   comenzarVigiliaDe,
@@ -18,6 +20,7 @@ import {
 // Solo tipos: desaparecen al compilar, así que el componente de cliente puede
 // importarlos de aquí sin cargar nada del servidor.
 export type { ResultadoBatalla, ResultadoRespuesta, ResultadoRetirar } from "@/lib/battle";
+export type { ResultadoEleccion } from "@/lib/rewards";
 
 // Estas acciones son la PUERTA: comprueban la sesión y que lo que se pide sea
 // del usuario, y después llaman al corazón de la batalla (lib/battle.ts), que
@@ -137,5 +140,21 @@ export async function retirarPregunta(
   if (!resultado) notFound();
   // Sin refresh(): la pantalla no cambia (la pregunta ya estaba contestada).
   // El banco de la materia se pinta de nuevo al visitarlo.
+  return resultado;
+}
+
+// Elige una bendición de la oferta de un jefe vencido. El navegador manda la
+// oferta y la clave; todo lo demás (que sea tuya, que se ofreciera, que no la
+// hayas elegido ya, que no caducara, que todavía sirva) lo comprueba
+// elegirBendicionDe (lib/rewards.ts) en el servidor.
+export async function elegirBendicion(offerId: string, key: string): Promise<ResultadoEleccion> {
+  const user = await requireUser();
+  if (typeof offerId !== "string") notFound();
+  if (!isBlessingKey(key)) return { ok: false, error: "Esa bendición no existe." };
+  const resultado = await elegirBendicionDe(user.id, offerId, key);
+  // No existe o es de otro: 404, sin distinguir los dos casos.
+  if (!resultado) notFound();
+  // La victoria enseña la elegida y la tarjeta del personaje, su chip.
+  refresh();
   return resultado;
 }

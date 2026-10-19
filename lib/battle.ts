@@ -21,18 +21,28 @@ import { todayDateInAppTimeZone, todayInAppTimeZone } from "@/lib/dates";
 import {
   advanceRedemption,
   applySoulsDelta,
+  ashShieldApplies,
+  BLESSING_RULES,
+  blessingOfferExpiry,
+  bossForTask,
   COUNTERATTACK,
   counterattackSouls,
+  eligibleBlessings,
   emberForCounterattack,
   flameAfterStrike,
+  flameRelicsCrossed,
   HP_PER_BLOCK,
   levelForSouls,
   nextReview,
+  relicKeyForBoss,
+  rollBlessingOffer,
   rollStrikeSouls,
   rollVictorySouls,
+  soulsBlessingBonus,
   vigilDurationMs,
   type AnswerOutcome,
   type EmberOutcome,
+  type RelicKey,
 } from "@/lib/game";
 import { preguntasParaContraataque } from "@/lib/questions/provider";
 import {
@@ -40,10 +50,12 @@ import {
   isGenericItem,
   parseItems,
   resolveItem,
+  strikeItems,
+  struckFor,
   toOriginalIndex,
   toShownIndex,
 } from "@/lib/questions/counterattack";
-import { bloquearMision, bloquearUsuario } from "@/lib/locks";
+import { bloquearMision, bloquearUsuario, gastarBendicion } from "@/lib/locks";
 import { formatCountdown } from "@/app/mazmorra/batalla/[id]/countdown";
 
 // Lo que devuelven comenzar, abandonar y golpear. Si ok es false, error lleva
@@ -56,6 +68,9 @@ import { formatCountdown } from "@/app/mazmorra/batalla/[id]/countdown";
 // salvaron la llama y las que quedan (solo si alguna se gastó). lateFall: el
 // golpe contó, pero el jefe no murió y su día de entrega ya pasó (vigilia
 // que cruzó la medianoche): caerá en la próxima revisión.
+// Recompensas (Fase 4): blessingBonus = las almas extra de la Bendición de las
+// almas (ya sumadas en strikeSouls); relicsEarned = las reliquias que dio este
+// golpe (la del jefe al vencerlo, o un hito de la llama).
 export type ResultadoBatalla =
   | {
       ok: true;
@@ -63,6 +78,8 @@ export type ResultadoBatalla =
       defeated?: boolean;
       lateFall?: boolean;
       strikeSouls?: number;
+      blessingBonus?: number;
+      relicsEarned?: RelicKey[];
       victorySouls?: number;
       recoveredSouls?: number;
       trialGranted?: boolean;
@@ -83,9 +100,9 @@ export const fallo = (error: string): ResultadoBatalla => ({ ok: false, error })
 // $queryRaw con plantilla: el id viaja como parámetro, nunca pegado al SQL.
 async function bloquearTarea(tx: Prisma.TransactionClient, taskId: string) {
   const rows = await tx.$queryRaw<
-    { status: TaskStatus; currentHp: number; difficulty: Difficulty; dueDate: Date }[]
+    { status: TaskStatus; currentHp: number; difficulty: Difficulty; dueDate: Date; bossKey: string }[]
   >`
-    SELECT "status", "currentHp", "difficulty", "dueDate" FROM "Task"
+    SELECT "status", "currentHp", "difficulty", "dueDate", "bossKey" FROM "Task"
     WHERE "id" = ${taskId} FOR UPDATE`;
   return rows[0];
 }
@@ -110,10 +127,11 @@ async function bloquearContraataque(
       soulsDelta: number;
       finishedAt: Date | null;
       bossDifficulty: Difficulty | null;
+      bonusPerCorrect: number;
     }[]
   >`
     SELECT "studySessionId", "items", "answered", "correctCount", "soulsDelta", "finishedAt",
-      "bossDifficulty"
+      "bossDifficulty", "bonusPerCorrect"
     FROM "Counterattack"
     WHERE "id" = ${counterattackId} AND "userId" = ${userId} FOR UPDATE`;
   return rows[0];
@@ -266,7 +284,21 @@ export async function asestarGolpeDe(
       });
     }
 
-    const gained = strikeSouls + (victorySouls ?? 0) + recoveredSouls;
+    // 6. Las bendiciones del usuario (llegan con él, ya bloqueado). La de las
+    // almas da +25 % de las almas del GOLPE (no las de la victoria ni las de
+    // la misión) y gasta un uso en esta misma transacción, aunque el 25 %
+    // redondee a 0. Las extra se guardan con las del golpe en la vigilia.
+    const soulsBlessing = owner.blessings.find((b) => b.key === "SOULS");
+    const blessingBonus = soulsBlessing ? soulsBlessingBonus(strikeSouls) : 0;
+    if (soulsBlessing) await gastarBendicion(tx, userId, soulsBlessing);
+    if (blessingBonus > 0) {
+      await tx.studySession.update({
+        where: { id: closed[0].id },
+        data: { soulsEarned: strikeSouls + blessingBonus },
+      });
+    }
+
+    const gained = strikeSouls + blessingBonus + (victorySouls ?? 0) + recoveredSouls;
     const souls = owner.souls + gained;
     const level = levelForSouls(souls).level;
     const flame = flameAfterStrike(
@@ -275,6 +307,8 @@ export async function asestarGolpeDe(
       todayInAppTimeZone(now),
       owner.embers,
     );
+    // La racha más larga (el perfil), en la misma escritura del usuario.
+    const bestFlame = Math.max(owner.bestFlame, flame.flame);
     await tx.user.update({
       where: { id: userId },
       data: {
@@ -283,8 +317,54 @@ export async function asestarGolpeDe(
         flame: flame.flame,
         lastStrikeDay: flame.lastStrikeDay,
         ...(flame.embersSpent > 0 && { embers: flame.embers }),
+        ...(bestFlame !== owner.bestFlame && { bestFlame }),
       },
     });
+
+    // 7. Reliquias (solo cosméticas): un hito de la llama que este golpe
+    // cruza por primera vez y, al vencer, la del jefe. skipDuplicates + el
+    // índice único (userId, key): cada una, una sola vez; devuelve solo las
+    // que se crearon ahora. earnedAt = now, el mismo instante que la vigilia
+    // del golpe final: así la victoria sabe qué reliquia enseñar al recargar.
+    const relicKeys: RelicKey[] = [
+      ...flameRelicsCrossed(owner.bestFlame, flame.flame),
+      ...(defeated
+        ? [relicKeyForBoss(bossForTask({ id: task.id, difficulty: locked.difficulty, bossKey: locked.bossKey }).key)]
+        : []),
+    ];
+    const relicsEarned =
+      relicKeys.length > 0
+        ? (
+            await tx.relic.createManyAndReturn({
+              data: relicKeys.map((key) => ({ userId, key, earnedAt: now })),
+              skipDuplicates: true,
+              select: { key: true },
+            })
+          ).map((relic) => relic.key as RelicKey)
+        : [];
+
+    // 8. Al vencer: la oferta de bendiciones, fijada aquí, en el servidor
+    // (rollBlessingOffer), con lo que hay DESPUÉS de este golpe: sin la de
+    // las almas si acaba de gastar su último uso, con las brasas que queden y
+    // con la misión que siga activa (si este golpe la cumplió o su plazo ya
+    // pasó, no hay). Una por jefe (BlessingOffer.taskId es único) y nadie más
+    // puede vencer a este jefe: la tarea está bloqueada.
+    if (defeated) {
+      const active = owner.blessings
+        .filter((b) => !(b.key === "SOULS" && b.usesLeft <= 1))
+        .map((b) => b.key);
+      const missionAfter =
+        mission && !advance?.completed && now.getTime() < mission.deadline.getTime() ? mission : null;
+      const options = rollBlessingOffer(
+        eligibleBlessings({ difficulty: locked.difficulty, active, embers: flame.embers, mission: missionAfter }),
+        Math.random,
+      );
+      if (options.length > 0) {
+        await tx.blessingOffer.create({
+          data: { userId, taskId: task.id, options, createdAt: now, expiresAt: blessingOfferExpiry(now) },
+        });
+      }
+    }
     // ¿Se subió de nivel con ESTE golpe? Se compara con el nivel que daban
     // las almas de antes, no con la columna.
     const leveledUp = level > levelForSouls(owner.souls).level;
@@ -302,7 +382,10 @@ export async function asestarGolpeDe(
         currentHp,
         defeated,
         ...(lateFall && { lateFall }),
-        strikeSouls,
+        // Las del golpe CON el extra de la bendición (lo que se sumó).
+        strikeSouls: strikeSouls + blessingBonus,
+        ...(blessingBonus > 0 && { blessingBonus }),
+        ...(relicsEarned.length > 0 && { relicsEarned }),
         victorySouls,
         recoveredSouls: recoveredSouls > 0 ? recoveredSouls : undefined,
         ...(advance?.trialGranted && { trialGranted: true }),
@@ -314,7 +397,7 @@ export async function asestarGolpeDe(
       studySessionId: defeated || lateFall ? undefined : closed[0].id,
       difficulty: locked.difficulty,
     };
-    // timeout: con la misión son hasta nueve viajes a la base (~250 ms cada
+    // timeout: con la misión y las recompensas son hasta trece viajes a la base (~250 ms cada
     // uno desde local), más la espera si la revisión de jefes vencidos tiene
     // al usuario bloqueado. Los 5 s por defecto se quedarían cortos.
   }, { timeout: 15_000 });
@@ -336,6 +419,16 @@ export async function asestarGolpeDe(
 // registra el error y sigue. El índice único de studySessionId impide un
 // segundo contraataque para la misma vigilia (P2002), aunque esto se llamara
 // dos veces.
+//
+// Aquí actúan, y se GASTAN en la misma transacción, dos bendiciones:
+//   - Ojo del escriba: tacha una incorrecta en cada pregunta de opción
+//     múltiple del banco (strikeItems, con node:crypto). Sin ninguna así, no
+//     se gasta: queda para el siguiente contraataque.
+//   - Lucidez: +5 almas por acierto, guardadas en bonusPerCorrect. Solo si
+//     hay alguna pregunta del banco (las genéricas no tienen aciertos); si
+//     no, tampoco se gasta.
+// Orden (lib/locks.ts): usuario → crea la fila del contraataque (nueva) →
+// bendiciones. Si algo falla, no se crea nada y no se gasta nada.
 async function crearContraataque(
   userId: string,
   subjectId: string,
@@ -349,9 +442,28 @@ async function crearContraataque(
       COUNTERATTACK.questionsByDifficulty[difficulty],
     );
     if (questions.length === 0) return;
-    await prisma.counterattack.create({
-      data: { studySessionId, userId, items: buildItems(questions), bossDifficulty: difficulty },
-    });
+    const base = buildItems(questions);
+    await prisma.$transaction(
+      async (tx) => {
+        const owner = await bloquearUsuario(tx, userId);
+        const eye = owner.blessings.find((b) => b.key === "SCRIBE_EYE");
+        const lucidity = owner.blessings.find((b) => b.key === "LUCIDITY");
+        const struck = eye ? strikeItems(base, questions) : { items: base, struck: 0 };
+        const useLucidity = lucidity !== undefined && questions.some((q) => q.source !== "GENERIC");
+        await tx.counterattack.create({
+          data: {
+            studySessionId,
+            userId,
+            items: struck.items,
+            bossDifficulty: difficulty,
+            bonusPerCorrect: useLucidity ? BLESSING_RULES.lucidityBonus : 0,
+          },
+        });
+        if (eye && struck.struck > 0) await gastarBendicion(tx, userId, eye);
+        if (lucidity && useLucidity) await gastarBendicion(tx, userId, lucidity);
+      },
+      { timeout: 15_000, maxWait: 10_000 },
+    );
   } catch (error) {
     console.error("No se pudo crear el contraataque; el golpe cuenta igual.", error);
   }
@@ -382,6 +494,10 @@ export type ResultadoRespuesta =
       soulsDelta: number;
       // La respuesta restaba, pero el nivel lo impidió (en parte o del todo).
       protectedByLevel: boolean;
+      // La respuesta restaba y el Escudo de ceniza lo impidió (gastó un uso).
+      shielded?: true;
+      // Almas extra de la Bendición de la lucidez en este acierto.
+      lucidityBonus?: number;
       newLevel?: number;
       // Solo al contestar la última: aciertos sobre el total, almas totales y,
       // si acertó todas las del banco, qué pasó con la brasa (ver
@@ -439,6 +555,12 @@ export async function responderPreguntaDe(
 
       const isLast = counter.answered + 1 >= items.length;
       const question = await resolveItem(tx, item);
+      // La opción tachada por el Ojo del escriba no se puede elegir (el
+      // navegador la deshabilita, pero una petición fabricada podría
+      // mandarla).
+      if (chosenIndex !== null && question && struckFor(item, question) === chosenIndex) {
+        return falloRespuesta("Esa opción está tachada por el Ojo del escriba.");
+      }
 
       // 2. Qué pasó y cuántas almas daría. La opción mostrada se traduce a la
       // de la pregunta con la permutación guardada.
@@ -461,6 +583,10 @@ export async function responderPreguntaDe(
               : "wrong";
         nominal = counterattackSouls(question.kind, outcome === "answered" ? "correct" : outcome);
       }
+      // Bendición de la lucidez (ya gastada al crear el contraataque): almas
+      // extra por cada acierto DEL BANCO (una genérica contestada no cuenta).
+      const lucidityBonus = outcome === "correct" ? counter.bonusPerCorrect : 0;
+      nominal += lucidityBonus;
 
       // Aciertos con esta respuesta. Una genérica contestada cuenta como
       // acierto en el resumen, pero no para la brasa (ver más abajo).
@@ -486,9 +612,19 @@ export async function responderPreguntaDe(
       let applied = 0;
       let newLevel: number | undefined;
       let ember: EmberSummary | undefined;
+      let shielded = false;
       if (nominal !== 0 || isLast || question?.questionId) {
         const owner = await bloquearUsuario(tx, userId);
-        const next = applySoulsDelta(owner.souls, nominal);
+        let next = applySoulsDelta(owner.souls, nominal);
+        // Escudo de ceniza: si esta respuesta iba a RESTAR almas (ya con el
+        // suelo del nivel), no resta, y gasta un uso aquí mismo. Esquivar
+        // (0) o un fallo que el nivel ya dejaba en 0 no lo gastan.
+        const shield = owner.blessings.find((b) => b.key === "ASH_SHIELD");
+        if (shield && ashShieldApplies(next.applied)) {
+          next = { souls: owner.souls, applied: 0 };
+          shielded = true;
+          await gastarBendicion(tx, userId, shield);
+        }
         applied = next.applied;
         const level = levelForSouls(next.souls).level;
         const reward = isLast
@@ -573,7 +709,10 @@ export async function responderPreguntaDe(
             : null,
         explanation: question?.explanation ?? null,
         soulsDelta: applied,
-        protectedByLevel: nominal < 0 && applied > nominal,
+        // Si fue el escudo, no fue el nivel.
+        protectedByLevel: !shielded && nominal < 0 && applied > nominal,
+        ...(shielded && { shielded: true as const }),
+        ...(lucidityBonus > 0 && { lucidityBonus }),
         newLevel,
         summary: isLast
           ? { correct: correctCount, total: items.length, souls: soulsDelta, ...(ember && { ember }) }

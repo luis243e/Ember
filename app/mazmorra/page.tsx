@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { Plus, Skull } from "lucide-react";
+import { Plus, Skull, Sparkles } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { loadCharacterExtras, preloadCharacter } from "@/lib/rewards";
 import { loadRedemption } from "@/lib/redemption";
 import { loadTrialStatus } from "@/lib/redemption-trial";
 import { AppShell } from "@/components/app/app-shell";
@@ -49,8 +50,7 @@ async function pastBosses(userId: string) {
     where: { status: { not: "ALIVE" }, subject: { userId } },
     _count: { _all: true },
   });
-  const count = (status: "DEFEATED" | "FAILED") =>
-    groups.find((g) => g.status === status)?._count._all ?? 0;
+  const count = (status: "DEFEATED" | "FAILED") => groups.find((g) => g.status === status)?._count._all ?? 0;
   return { defeated: count("DEFEATED"), failed: count("FAILED") };
 }
 
@@ -76,6 +76,9 @@ function aliveBosses(userId: string) {
 export default async function MazmorraPage() {
   // Sin sesión válida, requireUser() redirige a /login.
   const sessionUser = await requireUser();
+  // Las bendiciones de la tarjeta del personaje, en paralelo con lo demás
+  // (AppShell recoge el resultado).
+  preloadCharacter(sessionUser.id);
 
   // La revisión de jefes vencidos (con la tarjeta y los avisos) y la lista de
   // jefes, EN PARALELO: en una carga normal, un solo viaje de espera. Si la
@@ -84,10 +87,13 @@ export default async function MazmorraPage() {
   // La materia del jefe caído, su banco y la prueba abierta (para la tarjeta
   // de la misión) van en el mismo viaje, en paralelo: una consulta que no
   // devuelve nada si no hay misión.
-  const [{ user, revised, activeMission, notices }, firstRead, firstTrial] = await Promise.all([
+  const [{ user, revised, activeMission, notices }, firstRead, firstTrial, extras] = await Promise.all([
     loadRedemption(sessionUser),
     aliveBosses(sessionUser.id),
     loadTrialStatus(sessionUser.id),
+    // Las ofertas de bendición sin elegir (la misma lectura, con cache(), que
+    // la tarjeta del personaje: no añade ningún viaje).
+    loadCharacterExtras(sessionUser.id),
   ]);
   const [tasks, trial] = revised
     ? await Promise.all([aliveBosses(user.id), loadTrialStatus(user.id)])
@@ -105,6 +111,7 @@ export default async function MazmorraPage() {
       {/* La misión de redención va encima de los jefes (o del estado vacío). */}
       <div className="flex flex-col gap-4 md:gap-6">
         {activeMission && <RedemptionCard mission={activeMission} trial={trial} />}
+        {extras.pendingOffers.length > 0 && <PendingReward offers={extras.pendingOffers} />}
         {past ? (
           <EmptyState
             icon={<Skull size={40} />}
@@ -148,5 +155,43 @@ export default async function MazmorraPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+// "Tienes una recompensa sin reclamar": una oferta de bendiciones que se cerró
+// sin elegir. Sigue pendiente 7 días desde la victoria (después caduca) y se
+// elige en la pantalla de victoria de ese jefe.
+function PendingReward({ offers }: { offers: { taskId: string; taskName: string }[] }) {
+  const [first, ...rest] = offers;
+  return (
+    // @container en la tarjeta y la fila dentro: una consulta de contenedor
+    // no se aplica al propio contenedor.
+    <section
+      aria-labelledby="recompensa-pendiente"
+      className="@container rounded-[10px] border border-gold/50 bg-gold/8 p-5"
+    >
+      <div className="flex flex-col gap-4 @sm:flex-row @sm:items-center @sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Sparkles aria-hidden size={20} className="mt-0.5 shrink-0 text-gold-bright" />
+          <div className="flex min-w-0 flex-col gap-1 leading-normal">
+            <h2 id="recompensa-pendiente" className="font-display text-base font-bold text-gold-bright">
+              Tienes una recompensa sin reclamar
+            </h2>
+            <p className="text-sm wrap-anywhere text-ash">
+              Venciste a «{first.taskName}» y su bendición te espera
+              {rest.length > 0 && ` (y ${rest.length === 1 ? "otra más" : `${rest.length} más`})`}. Tienes 7
+              días desde la victoria para elegirla.
+            </p>
+          </div>
+        </div>
+        <ButtonLink
+          href={`/mazmorra/batalla/${first.taskId}`}
+          size="sm"
+          className="w-full shrink-0 @sm:w-auto"
+        >
+          Elegir bendición
+        </ButtonLink>
+      </div>
+    </section>
   );
 }

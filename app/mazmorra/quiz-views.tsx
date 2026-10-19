@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, X } from "lucide-react";
+import { Check, Eye, X } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
@@ -43,28 +43,50 @@ export function QuestionView({
 }) {
   return (
     <>
+      {/* El Ojo del escriba actúa aquí: se dice antes de las opciones. */}
+      {question.struck !== null && (
+        <p className="flex items-center gap-2 text-[13px] leading-[normal] font-semibold text-gold">
+          <Eye aria-hidden size={15} className="shrink-0" />
+          El Ojo del escriba ha tachado una opción incorrecta.
+        </p>
+      )}
       <ul className="flex flex-col gap-2.5">
-        {question.options.map((option, i) => (
-          <li key={i}>
-            {/* aria-disabled y no disabled mientras espera: un botón con el
-                foco que pasa a disabled lo pierde (se va a <body>). */}
-            <button
-              type="button"
-              onClick={() => onAnswer(i)}
-              aria-disabled={pending || undefined}
-              aria-keyshortcuts={String(i + 1)}
-              className={cn(
-                "flex min-h-14 w-full cursor-pointer items-center gap-3.5 rounded-lg border border-line bg-surface px-4 py-3 text-left transition-colors hover:border-gold aria-disabled:cursor-wait",
-                FOCUS_RING,
-              )}
-            >
-              <Letter index={i} />
-              <span className="min-w-0 flex-1 text-base leading-snug wrap-anywhere text-parchment">
-                {option}
-              </span>
-            </button>
-          </li>
-        ))}
+        {question.options.map((option, i) => {
+          const struck = question.struck === i;
+          return (
+            <li key={i}>
+              {/* aria-disabled y no disabled mientras espera: un botón con el
+                  foco que pasa a disabled lo pierde (se va a <body>). La
+                  tachada sí va disabled: nunca se puede elegir (el servidor
+                  también la rechaza) y así no recibe el foco. */}
+              <button
+                type="button"
+                onClick={() => onAnswer(i)}
+                disabled={struck}
+                aria-disabled={(pending && !struck) || undefined}
+                aria-keyshortcuts={struck ? undefined : String(i + 1)}
+                className={cn(
+                  "flex min-h-14 w-full items-center gap-3.5 rounded-lg border border-line bg-surface px-4 py-3 text-left transition-colors",
+                  struck
+                    ? "cursor-not-allowed opacity-40"
+                    : "cursor-pointer hover:border-gold aria-disabled:cursor-wait",
+                  FOCUS_RING,
+                )}
+              >
+                <Letter index={i} />
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 text-base leading-snug wrap-anywhere text-parchment",
+                    struck && "line-through decoration-2",
+                  )}
+                >
+                  {option}
+                  {struck && <span className="sr-only"> (tachada por el Ojo del escriba: es incorrecta)</span>}
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
 
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pt-1">
@@ -131,6 +153,7 @@ export function RevealedView({
           {question.options.map((option, i) => {
             const isCorrect = correctIndex === i;
             const isChosen = chosen === i;
+            const isStruck = question.struck === i;
             // En las genéricas no hay correcta: se marca en dorado la elegida.
             const good = isCorrect || (outcome === "answered" && isChosen);
             const bad = isChosen && outcome === "wrong";
@@ -151,9 +174,11 @@ export function RevealedView({
                   className={cn(
                     "min-w-0 flex-1 text-base leading-snug wrap-anywhere text-parchment",
                     (good || bad) && "font-semibold",
+                    isStruck && "line-through decoration-2",
                   )}
                 >
                   {option}
+                  {isStruck && <span className="sr-only"> (tachada por el Ojo del escriba)</span>}
                   {/* Para el lector de pantalla, lo que dicen los colores. */}
                   {isCorrect && <span className="sr-only"> (respuesta correcta)</span>}
                   {isChosen && <span className="sr-only"> (tu respuesta)</span>}

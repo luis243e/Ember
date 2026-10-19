@@ -98,6 +98,25 @@ enum RedemptionRule {
   TRIAL          // cada vigilia da un intento de la prueba de redención
 }
 
+// Las bendiciones: recompensas temporales que se eligen al vencer a un jefe
+// (BLESSINGS en lib/game.ts, con su rareza, sus usos y su efecto). Ninguna
+// acorta la vigilia, quita vida al jefe ni da golpes.
+enum BlessingKey {
+  SOULS            // común: +25 % de almas en los próximos 3 golpes
+  ASH_SHIELD       // común: 2 respuestas falladas del contraataque no restan
+  LUCIDITY         // común: en el próximo contraataque, +5 almas por acierto
+  EMBER_SPARK      // rara: +1 brasa al elegirla (se aplica y no queda activa)
+  SCRIBE_EYE       // rara: en el próximo contraataque, una opción incorrecta tachada
+  REDEMPTION_SEAL  // épica: la próxima prueba de redención se aprueba con 3 de 5
+}
+
+// Estado de una relación entre compañeros (lib/friends.ts).
+enum FriendshipStatus {
+  PENDING   // solicitud enviada, sin contestar
+  ACCEPTED  // compañeros
+  DECLINED  // rechazada: la fila se queda como lápida (ver Friendship)
+}
+
 
 // -----------------------------------------------------------------------------
 //  MODELOS: cada "model" se convierte en una TABLA de Postgres.
@@ -171,6 +190,35 @@ model User {
   // 5; vuelve a 1 cuando pasan 24 h desde el último.
   authEmailCount Int @default(0)
 
+  // --- Perfil, recompensas y compañeros (Fase 4) ---
+  // La racha más larga. Se actualiza al golpear (lib/battle.ts), con el
+  // usuario bloqueado. La migración 20261019*_fase4 la rellenó con una COTA
+  // INFERIOR (la llama guardada o los días seguidos con golpe): las brasas de
+  // antes no dejaron rastro. Un CHECK de esa migración impide que sea < 0.
+  bestFlame    Int      @default(0)
+
+  // La reliquia equipada como título (la clave de RELICS en lib/game.ts), o
+  // null. Solo se puede equipar una que se tenga (lib/rewards.ts).
+  equippedRelic String?
+
+  // Código de amigo: 8 caracteres del alfabeto FRIEND_CODE (lib/friends.ts).
+  // Opcional para que el código que sigue desplegado durante una migración
+  // pueda crear usuarios sin él; los nuevos lo reciben al crearse
+  // (lib/auth.ts) y, si faltara, al abrir /companeros. Un CHECK de la
+  // migración comprueba el formato.
+  friendCode   String?  @unique
+
+  // ¿Ven los compañeros el título, el nivel, la llama y los golpes? Si no,
+  // solo el nombre (y no sale en su clasificación).
+  showStats    Boolean  @default(true)
+
+  // Solicitudes de compañero intentadas HOY (día de Colombia, guardado a las
+  // 00:00 UTC como lastStrikeDay). Cuentan todos los intentos con un código
+  // bien formado, exista o no: así el límite frena también el barrido de
+  // códigos. Un contador y no las filas: cancelar no lo devuelve.
+  friendRequestDay   DateTime?
+  friendRequestCount Int     @default(0)
+
   // --- Relación ---
   // Un usuario tiene MUCHAS materias. "Subject[]" (con corchetes) = lista.
   // OJO: esta línea NO crea una columna en la tabla; es un "atajo" para que
@@ -199,6 +247,16 @@ model User {
 
   // Pruebas de redención que ha afrontado.
   redemptionTrials RedemptionTrial[]
+
+  // Recompensas: las bendiciones activas, las ofertas de bendición y las
+  // reliquias conseguidas.
+  blessings      Blessing[]
+  blessingOffers BlessingOffer[]
+  relics         Relic[]
+
+  // Compañeros: las solicitudes que envió y las que recibió (aceptadas o no).
+  friendshipsSent     Friendship[] @relation("FriendshipRequester")
+  friendshipsReceived Friendship[] @relation("FriendshipAddressee")
 }
 
 
@@ -279,10 +337,14 @@ model Account {
 model Verification {
   id         String   @id
 
-  // A qué o a quién pertenece el código (por ejemplo, un correo).
+  // A qué o a quién pertenece el código. OJO: depende del uso. En el
+  // restablecimiento de contraseña, identifier lleva el token
+  // ("reset-password:<token>") y value el id del usuario. El enlace de
+  // verificación de correo no deja fila (es un JWT firmado).
   identifier String
 
-  // El código o token en sí.
+  // El valor asociado (en el restablecimiento, el id del usuario). No tiene
+  // clave foránea: al borrar una cuenta se borran a mano (lib/profile.ts).
   value      String
 
   expiresAt  DateTime
@@ -376,6 +438,9 @@ model Task {
 
   // Misiones de redención que provocó la caída de este jefe.
   redemptionMissions RedemptionMission[]
+
+  // La oferta de bendiciones de su victoria (como mucho una).
+  blessingOffer BlessingOffer?
 
   // Índice para buscar rápido las tareas de una materia.
   @@index([subjectId])
@@ -522,6 +587,12 @@ model RedemptionTrial {
 
   // Cuándo terminó: al contestar la última. null = en curso.
   finishedAt   DateTime?
+
+  // Aciertos que hacen falta para aprobar, fijados al empezar: 4
+  // (REDEMPTION.trial.passWith), o 3 con el Sello de redención, que se gasta
+  // al empezarla (lib/redemption-trial.ts). Un CHECK de la migración fase4
+  // lo deja entre 1 y 5.
+  passWith     Int               @default(4)
 
   createdAt    DateTime          @default(now())
 
@@ -673,6 +744,11 @@ model Counterattack {
   // columna: sigue funcionando, pero no da brasa.
   bossDifficulty Difficulty?
 
+  // Almas extra por cada acierto de este contraataque: 0, o las de la
+  // Bendición de la lucidez, que se gasta al CREARLO (lib/battle.ts). Solo los
+  // aciertos de verdad: una genérica contestada no cuenta.
+  bonusPerCorrect Int          @default(0)
+
   // Preguntas ya contestadas (o esquivadas, o saltadas). La que toca es
   // items[answered].
   answered       Int           @default(0)
@@ -729,4 +805,120 @@ model AgentInvocation {
   @@index([userId, createdAt])
   // Las de una materia (borrado en cascada).
   @@index([subjectId])
+}
+
+
+// =============================================================================
+//  FASE 4: RECOMPENSAS Y COMPAÑEROS
+//  Las reglas viven en lib/game.ts (BLESSINGS, RELICS y sus funciones puras);
+//  las transacciones, en lib/battle.ts, lib/redemption-trial.ts,
+//  lib/rewards.ts y lib/friends.ts. Lo que Prisma no sabe escribir aquí
+//  (CHECK, el índice único de la pareja) va a mano en la migración fase4.
+//  Estas filas son del usuario: SOLO se modifican con su fila de User ya
+//  bloqueada (orden de bloqueos en lib/locks.ts).
+// =============================================================================
+
+// ========== BENDICIÓN ACTIVA ==========
+// Una bendición elegida que aún tiene usos. Cuando se gasta el último, la
+// fila se BORRA (por eso basta un índice único por usuario y tipo: nunca hay
+// dos iguales activas). Un CHECK impide usesLeft < 1.
+model Blessing {
+  id        String      @id @default(cuid())
+
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  key       BlessingKey
+
+  // Usos que le quedan (BLESSINGS[key].uses al elegirla).
+  usesLeft  Int
+
+  createdAt DateTime    @default(now())
+
+  @@unique([userId, key])
+}
+
+
+// ========== OFERTA DE BENDICIONES ==========
+// Al vencer a un jefe, el servidor fija hasta 3 bendiciones distintas para
+// elegir una (rollBlessingOffer en lib/game.ts), en la MISMA transacción que
+// la victoria. Una por jefe (taskId @unique). Elegir se valida en el servidor
+// contra estas opciones (lib/rewards.ts). Sin elegir, sigue pendiente hasta
+// expiresAt (7 días) y después caduca. CHECK: de 1 a 3 opciones; chosenKey
+// una de ellas; chosenKey y chosenAt, los dos o ninguno.
+model BlessingOffer {
+  id         String        @id @default(cuid())
+
+  userId     String
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // El jefe vencido. Si se borra (con su materia o la cuenta), se va con él.
+  taskId     String        @unique
+  task       Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  // Las bendiciones ofrecidas, en el orden en que se muestran.
+  options    BlessingKey[]
+
+  // La elegida y cuándo. null = pendiente.
+  chosenKey  BlessingKey?
+  chosenAt   DateTime?
+
+  createdAt  DateTime      @default(now())
+  expiresAt  DateTime
+
+  // Las pendientes de un usuario (la mazmorra y la tarjeta).
+  @@index([userId])
+}
+
+
+// ========== RELIQUIA ==========
+// Recompensa permanente y SOLO cosmética: da un título que se puede equipar
+// (User.equippedRelic). key es la de RELICS en lib/game.ts ("boss:<jefe>" o
+// "flame:<días>"). Una sola vez por usuario (índice único).
+model Relic {
+  id       String   @id @default(cuid())
+
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  key      String
+
+  earnedAt DateTime @default(now())
+
+  @@unique([userId, key])
+}
+
+
+// ========== COMPAÑEROS ==========
+// Una fila por pareja, sea cual sea el sentido: un índice único a mano sobre
+// (LEAST(requesterId, addresseeId), GREATEST(...)) impide A→B y B→A a la vez,
+// y un CHECK impide ser compañero de uno mismo.
+//   PENDING: requester pidió, addressee aún no contesta.
+//   ACCEPTED: compañeros. Quitar a un compañero BORRA la fila.
+//   DECLINED: addressee rechazó. La fila se queda como LÁPIDA: quien la envió
+//     no se entera (la ve como pendiente) y, si vuelve a enviar, recibe el
+//     mensaje genérico sin notificar de nuevo. Si la cancela, deja de verla
+//     (hiddenByRequester), pero la fila sigue. Solo quien rechazó puede
+//     reabrirla, introduciendo el código del otro.
+model Friendship {
+  id                String           @id @default(cuid())
+
+  requesterId       String
+  requester         User             @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+
+  addresseeId       String
+  addressee         User             @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  status            FriendshipStatus @default(PENDING)
+
+  // Solo en DECLINED: quien la envió la canceló y ya no la ve.
+  hiddenByRequester Boolean          @default(false)
+
+  createdAt         DateTime         @default(now())
+
+  // Cuándo se aceptó o se rechazó.
+  respondedAt       DateTime?
+
+  @@index([requesterId])
+  @@index([addresseeId])
 }

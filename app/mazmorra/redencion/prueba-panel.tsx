@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Award } from "lucide-react";
 import { useEffect, useRef, useState, useTransition, type KeyboardEvent, type RefObject } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +27,15 @@ export type TrialStatusData = {
 
 // La pregunta que toca de la prueba abierta (loadOpenTrial). number empieza
 // en 0. question null = se borró del banco a mitad de la prueba.
-export type TrialData = { id: string; number: number; total: number; correct: number; question: PublicQuestion | null };
+// passWith: los aciertos que bastan en esta prueba (3 si gastó el Sello).
+export type TrialData = {
+  id: string;
+  number: number;
+  total: number;
+  correct: number;
+  passWith: number;
+  question: PublicQuestion | null;
+};
 
 type Answered = Extract<ResultadoPrueba, { ok: true }>;
 
@@ -167,6 +176,10 @@ export function PruebaPanel({ status, trial }: { status: TrialStatusData; trial:
               </div>
             </div>
 
+            {/* El Sello de redención actúa aquí: se gastó al empezar la
+                prueba, que guarda cuántos aciertos bastan. */}
+            {current.passWith < PASS && <SealLine passWith={current.passWith} />}
+
             <h3
               ref={promptRef}
               tabIndex={-1}
@@ -204,7 +217,7 @@ export function PruebaPanel({ status, trial }: { status: TrialStatusData; trial:
                 question={current.question}
                 pending={pending}
                 onAnswer={answer}
-                stakes={`Necesitas ${PASS} de ${TOTAL} · llevas ${current.correct} ${current.correct === 1 ? "acierto" : "aciertos"}`}
+                stakes={`Necesitas ${current.passWith} de ${TOTAL} · llevas ${current.correct} ${current.correct === 1 ? "acierto" : "aciertos"}`}
               />
             ) : (
               // Se borró del banco a mitad de la prueba: al seguir, la acción
@@ -356,6 +369,7 @@ function SummaryView({
         {summary.correct} / {summary.total}
         <span className="sr-only"> aciertos</span>
       </p>
+      {summary.passWith < PASS && <SealLine passWith={summary.passWith} />}
 
       {summary.passed ? (
         <>
@@ -439,4 +453,15 @@ function resultSentence(result: Answered): string {
     case "skipped":
       return "Pregunta saltada: ya no existe. No cuenta como acierto.";
   }
+}
+
+// "Sello de redención: bastan 3 de 5". Sale en la prueba que lo gastó (se
+// gasta al empezarla y la prueba guarda passWith).
+function SealLine({ passWith }: { passWith: number }) {
+  return (
+    <p className="flex items-center gap-2 text-[13px] leading-[normal] font-semibold text-gold">
+      <Award aria-hidden size={15} className="shrink-0" />
+      Sello de redención: bastan {passWith} de {TOTAL}.
+    </p>
+  );
 }

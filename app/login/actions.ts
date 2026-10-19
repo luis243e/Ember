@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { isAPIError } from "better-auth/api";
-import { auth } from "@/lib/auth";
+import { auth, googleEnabled } from "@/lib/auth";
 import { authErrorMessage } from "@/lib/auth-errors";
 import type { EstadoAcceso } from "@/app/registro/actions";
 
@@ -32,4 +32,26 @@ export async function iniciarSesion(
   }
 
   redirect("/mazmorra");
+}
+
+// "Continuar con Google" (en /login y /registro). Better Auth prepara la
+// petición a Google (OAuth 2.0 con PKCE): guarda el "state" y el
+// code_verifier en Verification y pone una cookie firmada que ata ese state a
+// ESTE navegador. nextCookies() la pasa a la respuesta de la acción; sin ella,
+// la vuelta de Google fallaría con "state mismatch". Después, a Google.
+// Vuelve a /api/auth/callback/google, que crea la sesión (o vincula la
+// cuenta) y redirige a la mazmorra; si algo falla, a /login?error=…
+export async function entrarConGoogle(): Promise<void> {
+  if (!googleEnabled) redirect("/login");
+  const { url } = await auth.api.signInSocial({
+    body: {
+      provider: "google",
+      callbackURL: "/mazmorra",
+      newUserCallbackURL: "/mazmorra",
+      errorCallbackURL: "/login",
+    },
+    headers: await headers(),
+  });
+  if (!url) redirect("/login?error=failed");
+  redirect(url);
 }

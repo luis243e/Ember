@@ -34,8 +34,10 @@ import type { Prisma } from "@prisma/client";
 export type ResultadoEscriba =
   | { ok: true; created: number }
   // limit: el error es el del límite diario (la tarjeta enseña "El escriba
-  // descansa" en vez de "no ha podido escribir").
-  | { ok: false; error: string; limit: boolean };
+  // descansa" en vez de "no ha podido escribir"). gone: la materia (con la
+  // cuenta) se borró mientras Gemini escribía: no se ha guardado nada y la
+  // acción no enseña ningún error (lleva a la landing).
+  | { ok: false; error: string; limit: boolean; gone?: true };
 
 const MINUTE_MS = 60 * 1000;
 
@@ -144,11 +146,15 @@ export async function invocarEscribaDe(
     }
 
     // 3. Guardar.
-    type Guardado = { ok: true; created: number } | { ok: false; error: string };
+    type Guardado = { ok: true; created: number } | { ok: false; error: string; gone?: true };
     const guardado = await prisma.$transaction(async (tx): Promise<Guardado> => {
       // Bloquea la materia, como crearPregunta: con ella bloqueada, nadie
       // añade preguntas a la vez y el recorte a 200 es exacto.
-      await tx.$queryRaw`SELECT 1 FROM "Subject" WHERE "id" = ${subjectId} FOR UPDATE`;
+      const locked = await tx.$queryRaw<unknown[]>`SELECT 1 FROM "Subject" WHERE "id" = ${subjectId} FOR UPDATE`;
+      // Ya no existe: la cuenta se borró mientras Gemini escribía (borrar la
+      // cuenta se lleva la materia y la invocación en cascada). Lo que
+      // devolvió Gemini se tira sin guardar nada y sin registrar un error.
+      if (locked.length === 0) return { ok: false, error: AGENT_ERRORS.unavailable, gone: true };
       const existing = await tx.question.findMany({ where: { subjectId }, select: { prompt: true, topic: true } });
       const room = MAX_QUESTIONS_PER_SUBJECT - existing.length;
       if (room <= 0) return { ok: false, error: AGENT_ERRORS.subjectFull };
@@ -177,6 +183,7 @@ export async function invocarEscribaDe(
     }, { timeout: 15_000, maxWait: 10_000 });
 
     if (!guardado.ok) {
+      if (guardado.gone) return { ok: false, error: guardado.error, limit: false, gone: true };
       await marcarFallida();
       return fallo(guardado.error);
     }
