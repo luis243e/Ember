@@ -83,8 +83,19 @@ enum AgentInvocationStatus {
 
 // Qué le dio el usuario al escriba. Solo el tipo: los apuntes no se guardan.
 enum AgentInputKind {
-  TEXT  // texto pegado
-  PDF   // un PDF subido
+  TEXT       // texto pegado
+  PDF        // un PDF subido
+  REINFORCE  // refuerzo: preguntas falladas del banco (elegidas por el servidor)
+}
+
+// Cómo se cumple una misión de redención. Se fija al caer y no cambia
+// (reglas en lib/game.ts, REDEMPTION y advanceRedemption).
+enum RedemptionRule {
+  LEGACY         // regla de antes de la Fase 3: 2 vigilias. Es el valor por
+                 // defecto: así las misiones que ya existían (y las que cree
+                 // el código viejo durante un despliegue) siguen con ella
+  FEW_QUESTIONS  // la materia del jefe tenía menos de 5 preguntas: 2 vigilias
+  TRIAL          // cada vigilia da un intento de la prueba de redención
 }
 
 
@@ -185,6 +196,9 @@ model User {
 
   // Invocaciones del escriba: con ellas se cuenta el límite diario.
   agentInvocations AgentInvocation[]
+
+  // Pruebas de redención que ha afrontado.
+  redemptionTrials RedemptionTrial[]
 }
 
 
@@ -431,6 +445,8 @@ model RedemptionMission {
 
   // El jefe que la provocó. Si cayeron varios a la vez, el primero por
   // fecha de entrega y nombre (los demás tienen el mismo Task.failedAt).
+  // Su materia (Task.subjectId) es la de la prueba de redención: no hace
+  // falta guardarla aparte.
   taskId       String
   task         Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
@@ -439,6 +455,15 @@ model RedemptionMission {
 
   // Vigilias cumplidas desde la caída. Las cuenta advanceRedemption().
   vigilsDone   Int              @default(0)
+
+  // Cómo se cumple. Se fija al caer (lib/redemption.ts). Las misiones de
+  // antes de la Fase 3 quedaron en LEGACY por el valor por defecto.
+  rule         RedemptionRule   @default(LEGACY)
+
+  // Intentos de la prueba ya empezados (solo TRIAL). Cada vigilia da uno:
+  // los disponibles son vigilsDone − trialsUsed. Un CHECK de la migración
+  // 20261018235832_fase3 impide que pase de vigilsDone o baje de 0.
+  trialsUsed   Int              @default(0)
 
   status       RedemptionStatus @default(ACTIVE)
 
@@ -453,8 +478,55 @@ model RedemptionMission {
   // desvanecidas" salen durante las 24 h siguientes a esta fecha.
   resolvedAt   DateTime?
 
+  // Las pruebas de redención de esta misión.
+  trials       RedemptionTrial[]
+
   @@index([userId])
   @@index([taskId])
+}
+
+
+// ========== PRUEBA DE REDENCIÓN ==========
+// Un intento de la prueba de una misión TRIAL: 5 preguntas del banco de la
+// materia del jefe caído; se aprueba con 4 (REDEMPTION.trial en lib/game.ts).
+// Como el contraataque, todo el estado vive aquí, en el servidor, y el
+// navegador solo manda "contesto la pregunta N con la opción X" (reglas y
+// bloqueos en lib/redemption-trial.ts). No da ni quita almas: solo devuelve
+// las de la misión al aprobar.
+// La migración 20261018235832_fase3 añade a mano un índice único parcial:
+// una sola prueba ABIERTA (finishedAt null) por misión. Prisma no sabe
+// escribirlo aquí.
+model RedemptionTrial {
+  id           String            @id @default(cuid())
+
+  // La misión de la que es intento. Si se borra la misión, se borra.
+  missionId    String
+  mission      RedemptionMission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  // Dueño. Se repite (la misión ya lo tiene) para comprobarlo sin unir tablas.
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Las preguntas, con el MISMO formato que Counterattack.items
+  // ({ ref, order }, validado con parseItems en lib/questions/counterattack.ts).
+  items        Json
+
+  // Contestadas (o esquivadas, o saltadas). La que toca es items[answered].
+  answered     Int               @default(0)
+
+  // Aciertos. Esquivar o una pregunta saltada (borrada) no cuentan.
+  correctCount Int               @default(0)
+
+  // ¿Aprobó? null = en curso (o abandonada porque la misión terminó).
+  passed       Boolean?
+
+  // Cuándo terminó: al contestar la última. null = en curso.
+  finishedAt   DateTime?
+
+  createdAt    DateTime          @default(now())
+
+  @@index([missionId])
+  @@index([userId])
 }
 
 
@@ -488,6 +560,13 @@ model Question {
 
   // Por qué es la correcta. Opcional, hasta 1000 caracteres.
   explanation  String?
+
+  // Tema ("Derivadas"): opcional, hasta 60 caracteres, normalizado con
+  // normalizeTopic (lib/questions/validation.ts). Lo pone el escriba o el
+  // formulario. Agrupa los "Puntos débiles" de la materia. El de una sellada
+  // tampoco sale del servidor (daría una pista). Las de antes de la Fase 3
+  // no tienen.
+  topic        String?
 
   // SELLADA: nadie la ha visto todavía. Solo las del escriba nacen selladas;
   // se revela (false) en cuanto un jefe la lanza y se contesta o se esquiva

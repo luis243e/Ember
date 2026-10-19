@@ -8,6 +8,7 @@ import { leerEntrada } from "@/lib/agent/input";
 import { invocarEscribaDe, type ResultadoEscriba } from "@/lib/agent/invocation";
 import { guardarEdicion, PREGUNTA_SELLADA } from "@/lib/questions/edit";
 import {
+  canonicalTopic,
   leerBorrador,
   MAX_QUESTIONS_PER_SUBJECT,
   validarPregunta,
@@ -19,10 +20,26 @@ import {
 // escrito si hubo error (para no perderlo) o vacío si se guardó.
 export type EstadoPregunta = { error: string | null; valores: QuestionDraft };
 
-// Formulario vacío. Conserva el tipo elegido, para escribir seguidas varias
-// preguntas del mismo tipo.
-function borradorVacio(type = "MULTIPLE_CHOICE"): QuestionDraft {
-  return { type, prompt: "", options: ["", "", "", ""], optionCount: 4, correctIndex: "", explanation: "" };
+// Formulario vacío. Conserva el tipo y el tema elegidos, para escribir
+// seguidas varias preguntas del mismo tipo y del mismo tema.
+function borradorVacio(type = "MULTIPLE_CHOICE", topic = ""): QuestionDraft {
+  return { type, prompt: "", options: ["", "", "", ""], optionCount: 4, correctIndex: "", explanation: "", topic };
+}
+
+// Los temas que ya tiene la materia, para canonicalTopic (si "Derivadas" ya
+// existe, "derivadas" se guarda como "Derivadas"). exceptId: sin contar los de
+// esa pregunta (la que se edita: así se puede corregir "derivadas" a
+// "Derivadas" en la única que lo tiene). tx: dentro de una transacción.
+async function temasDe(
+  subjectId: string,
+  { exceptId, tx = prisma }: { exceptId?: string; tx?: Pick<typeof prisma, "question"> } = {},
+) {
+  const rows = await tx.question.findMany({
+    where: { subjectId, topic: { not: null }, ...(exceptId && { id: { not: exceptId } }) },
+    distinct: ["topic"],
+    select: { topic: true },
+  });
+  return rows.map((row) => row.topic);
 }
 
 // La materia, solo si es del usuario. Como tareaPropia() de la batalla: si el
@@ -78,9 +95,10 @@ export async function crearPregunta(
     await tx.$queryRaw`SELECT 1 FROM "Subject" WHERE "id" = ${subject.id} FOR UPDATE`;
     const total = await tx.question.count({ where: { subjectId: subject.id } });
     if (total >= MAX_QUESTIONS_PER_SUBJECT) return false;
+    const topic = canonicalTopic(validacion.data.topic ?? null, await temasDe(subject.id, { tx }));
     await tx.question.create({
       // source lo pone el servidor: lo que escribe una persona es MANUAL.
-      data: { ...validacion.data, subjectId: subject.id, source: "MANUAL" },
+      data: { ...validacion.data, topic, subjectId: subject.id, source: "MANUAL" },
     });
     return true;
   });
@@ -93,7 +111,7 @@ export async function crearPregunta(
   }
 
   revalidarMateria(subject.id);
-  return { error: null, valores: borradorVacio(validacion.data.type) };
+  return { error: null, valores: borradorVacio(validacion.data.type, validacion.data.topic ?? "") };
 }
 
 export async function editarPregunta(
@@ -113,7 +131,11 @@ export async function editarPregunta(
   const validacion = validarPregunta(borrador);
   if (!validacion.ok) return { error: validacion.error, valores: borrador };
 
-  const guardada = await guardarEdicion(question.id, validacion.data);
+  const topic = canonicalTopic(
+    validacion.data.topic ?? null,
+    await temasDe(question.subjectId, { exceptId: question.id }),
+  );
+  const guardada = await guardarEdicion(question.id, { ...validacion.data, topic });
   if (guardada === "sealed") return { error: PREGUNTA_SELLADA, valores: borradorVacio() };
 
   revalidarMateria(question.subjectId);

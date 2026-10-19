@@ -24,7 +24,9 @@
 import { prisma } from "@/lib/prisma";
 import { startOfTodayInAppTimeZone } from "@/lib/dates";
 import { generarPreguntas, isAgentConfigured, type AgentGenerator, type AgentInput } from "@/lib/agent/gemini";
+import type { EscribaRequest } from "@/lib/agent/input";
 import { prepararPreguntas } from "@/lib/agent/questions";
+import { preguntasParaRefuerzo } from "@/lib/agent/reinforce";
 import { AGENT, AGENT_ERRORS } from "@/lib/agent/rules";
 import { MAX_QUESTIONS_PER_SUBJECT } from "@/lib/questions/validation";
 import type { Prisma } from "@prisma/client";
@@ -49,6 +51,21 @@ function cuentanHoy(userId: string, now: Date): Prisma.AgentInvocationWhereInput
   };
 }
 
+// Los temas de la materia que se le pasan al escriba para que los reutilice:
+// los AGENT.maxTopicsSent más usados (con más preguntas), con un groupBy de
+// Prisma: GROUP BY "topic" con COUNT(*), ordenado por ese recuento. Incluye
+// los de las selladas: esto no sale hacia el navegador, solo hacia Gemini.
+export async function temasParaElEscriba(subjectId: string): Promise<string[]> {
+  const groups = await prisma.question.groupBy({
+    by: ["topic"],
+    where: { subjectId, topic: { not: null } },
+    _count: { _all: true },
+    orderBy: [{ _count: { topic: "desc" } }, { topic: "asc" }],
+    take: AGENT.maxTopicsSent,
+  });
+  return groups.flatMap((group) => (group.topic === null ? [] : [group.topic]));
+}
+
 // Las que le quedan hoy, para la tarjeta ("Te quedan 2 de 3 invocaciones hoy").
 export async function invocacionesRestantes(userId: string, now: Date = new Date()): Promise<number> {
   const used = await prisma.agentInvocation.count({ where: cuentanHoy(userId, now) });
@@ -59,10 +76,13 @@ const fallo = (error: string, limit = false): ResultadoEscriba => ({ ok: false, 
 
 // generar: la función que llama a Gemini; el script de pruebas pasa otra para
 // simular respuestas y fallos sin gastar cuota.
+// request: apuntes (TEXT, PDF) o REINFORCE. En el refuerzo, las preguntas
+// falladas las elige aquí el servidor, ANTES de reservar: si no hay bastantes,
+// el error no gasta invocación.
 export async function invocarEscribaDe(
   userId: string,
   subjectId: string,
-  input: AgentInput,
+  request: EscribaRequest,
   generar: AgentGenerator = generarPreguntas,
   now: Date = new Date(),
 ): Promise<ResultadoEscriba> {
@@ -72,6 +92,19 @@ export async function invocarEscribaDe(
   // Se vuelve a comprobar al guardar, con la materia bloqueada.
   const total = await prisma.question.count({ where: { subjectId } });
   if (total >= MAX_QUESTIONS_PER_SUBJECT) return fallo(AGENT_ERRORS.subjectFull);
+
+  // Lo que se le da al escriba. En el refuerzo, solo las preguntas elegidas
+  // (como mucho 10) y sin la lista de temas de la materia: a Google no va
+  // nada más que esas preguntas.
+  let input: AgentInput;
+  if (request.kind === "REINFORCE") {
+    const refuerzo = await preguntasParaRefuerzo(userId, subjectId);
+    if (refuerzo.candidates < AGENT.reinforce.minFailed) return fallo(AGENT_ERRORS.notEnoughFailed);
+    input = { kind: "REINFORCE", questions: refuerzo.questions };
+  } else {
+    input = request;
+  }
+  const reinforce = input.kind === "REINFORCE";
 
   // 1. Reservar.
   const reserva = await prisma.$transaction(async (tx) => {
@@ -102,8 +135,9 @@ export async function invocarEscribaDe(
     });
 
   try {
-    // 2. Gemini, fuera de la transacción.
-    const result = await generar(input);
+    // 2. Gemini, fuera de la transacción, con los temas que ya tiene la
+    // materia para que los reutilice (salvo en el refuerzo).
+    const result = await generar(input, reinforce ? undefined : { topics: await temasParaElEscriba(subjectId) });
     if (!result.ok) {
       await marcarFallida();
       return fallo(AGENT_ERRORS[result.failure]);
@@ -115,13 +149,17 @@ export async function invocarEscribaDe(
       // Bloquea la materia, como crearPregunta: con ella bloqueada, nadie
       // añade preguntas a la vez y el recorte a 200 es exacto.
       await tx.$queryRaw`SELECT 1 FROM "Subject" WHERE "id" = ${subjectId} FOR UPDATE`;
-      const existing = await tx.question.findMany({ where: { subjectId }, select: { prompt: true } });
+      const existing = await tx.question.findMany({ where: { subjectId }, select: { prompt: true, topic: true } });
       const room = MAX_QUESTIONS_PER_SUBJECT - existing.length;
       if (room <= 0) return { ok: false, error: AGENT_ERRORS.subjectFull };
 
       const { questions, discarded } = prepararPreguntas(
         result.raw,
         existing.map((question) => question.prompt),
+        {
+          existingTopics: existing.map((question) => question.topic),
+          max: reinforce ? AGENT.reinforce.maxQuestions : AGENT.maxQuestions,
+        },
       );
       if (discarded > 0) console.info("[escriba] preguntas descartadas", { discarded });
       const kept = questions.slice(0, room);

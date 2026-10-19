@@ -111,7 +111,7 @@ function probarValidacion(): void {
 // ---------------------------------------------------------------------------
 //  2. Proveedor
 // ---------------------------------------------------------------------------
-async function probarProveedor(tempSubjectId: string): Promise<void> {
+async function probarProveedor(tempUserId: string, tempSubjectId: string): Promise<void> {
   console.log("\n2. preguntasParaContraataque");
 
   const user = await prisma.user.findUnique({ where: { email: "prueba@ember.test" }, select: { id: true } });
@@ -140,10 +140,19 @@ async function probarProveedor(tempSubjectId: string): Promise<void> {
     muchas.length,
   );
 
-  // Al azar: en 40 sorteos de 3 entre 5 tiene que salir más de un orden.
+  // Al azar: en 40 sorteos de 3 entre 5 NUEVAS tiene que salir más de un
+  // orden. En una materia propia con preguntas sin contestar: las del seed
+  // tienen intentos (Puntos débiles, Fase 3) y el repaso las ordena siempre
+  // igual (pickForCounterattack), que es lo correcto.
+  const nuevas = await prisma.subject.create({ data: { name: "Nuevas", userId: tempUserId } });
+  await prisma.question.createMany({
+    data: Array.from({ length: 5 }, (_, i) => ({
+      subjectId: nuevas.id, type: "TRUE_FALSE" as const, prompt: `Nueva ${i}`, options: ["Verdadero", "Falso"], correctIndex: 0,
+    })),
+  });
   const ordenes = new Set<string>();
   for (let i = 0; i < 40; i++) {
-    ordenes.add((await preguntasParaContraataque(user.id, calculo.id, 3)).map((q) => q.id).join(","));
+    ordenes.add((await preguntasParaContraataque(tempUserId, nuevas.id, 3)).map((q) => q.id).join(","));
   }
   check(`el orden cambia entre sorteos (${ordenes.size} distintos en 40)`, ordenes.size > 1);
 
@@ -268,7 +277,7 @@ const tempUser = await prisma.user.create({
 try {
   const tempSubject = await prisma.subject.create({ data: { name: "Ajena", userId: tempUser.id } });
   probarValidacion();
-  await probarProveedor(tempSubject.id);
+  await probarProveedor(tempUser.id, tempSubject.id);
   await probarChecks(tempUser.id, tempSubject.id);
 } catch (error) {
   fallos++;

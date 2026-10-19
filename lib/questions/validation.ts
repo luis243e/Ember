@@ -20,6 +20,7 @@ export const TRUE_FALSE_OPTIONS = ["Verdadero", "Falso"];
 export const MAX_PROMPT_LENGTH = 500;
 export const MAX_OPTION_LENGTH = 200;
 export const MAX_EXPLANATION_LENGTH = 1000;
+export const MAX_TOPIC_LENGTH = 60;
 export const MAX_QUESTIONS_PER_SUBJECT = 200;
 
 // Lo escrito en el formulario, casi tal cual: si hay error, vuelve al
@@ -36,6 +37,8 @@ export type QuestionDraft = {
   optionCount: number;
   correctIndex: string;
   explanation: string;
+  // Tema, opcional. Si no llega (un borrador de antes de los temas), vacío.
+  topic?: string;
 };
 
 // Una pregunta ya validada y limpia, lista para guardar.
@@ -45,6 +48,9 @@ export type QuestionInput = {
   options: string[];
   correctIndex: number;
   explanation: string | null;
+  // null = sin tema. validarPregunta lo pone siempre; si falta (undefined),
+  // guardarEdicion no lo toca.
+  topic?: string | null;
 };
 
 export type QuestionValidation = { ok: true; data: QuestionInput } | { ok: false; error: string };
@@ -69,7 +75,35 @@ export function leerBorrador(formData: FormData): QuestionDraft {
     optionCount: sent.length,
     correctIndex: text("correctIndex"),
     explanation: text("explanation"),
+    topic: text("topic"),
   };
+}
+
+// ---------------------------------------------------------------------------
+//  El tema
+// ---------------------------------------------------------------------------
+
+// Tema limpio: sin espacios en los extremos ni repetidos (también los saltos
+// de línea, que en un tema no tienen sentido). Vacío → null (sin tema). NO
+// comprueba la longitud: eso lo dice validarPregunta (a mano, con un error)
+// o temaDelEscriba (del modelo, que lo deja en null).
+export function normalizeTopic(value: string): string | null {
+  const topic = normalizeName(value);
+  return topic === "" ? null : topic;
+}
+
+// Clave para comparar temas: sin distinguir mayúsculas.
+export function topicKey(topic: string): string {
+  return topic.toLocaleLowerCase("es");
+}
+
+// Si el tema ya existe en la materia con otras mayúsculas, se guarda como ya
+// estaba ("derivadas" → "Derivadas"): así los Puntos débiles no parten un
+// mismo tema en dos. existing: los temas de la materia (pueden repetirse).
+export function canonicalTopic(topic: string | null, existing: readonly (string | null)[]): string | null {
+  if (topic === null) return null;
+  const key = topicKey(topic);
+  return existing.find((other) => other !== null && topicKey(other) === key) ?? topic;
 }
 
 // Valida y limpia un borrador. Devuelve el primer error que encuentra, en
@@ -130,8 +164,14 @@ export function validarPregunta(draft: QuestionDraft): QuestionValidation {
     return fail(`La explicación no puede pasar de ${MAX_EXPLANATION_LENGTH} caracteres.`);
   }
 
+  // --- Tema: opcional, hasta MAX_TOPIC_LENGTH. ---
+  const topic = normalizeTopic(draft.topic ?? "");
+  if (topic !== null && topic.length > MAX_TOPIC_LENGTH) {
+    return fail(`El tema no puede pasar de ${MAX_TOPIC_LENGTH} caracteres.`);
+  }
+
   return {
     ok: true,
-    data: { type, prompt, options, correctIndex, explanation: explanation === "" ? null : explanation },
+    data: { type, prompt, options, correctIndex, explanation: explanation === "" ? null : explanation, topic },
   };
 }

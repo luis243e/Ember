@@ -7,6 +7,8 @@ import { requireUser } from "@/lib/session";
 import { loadRedemption } from "@/lib/redemption";
 import { QUESTION_TYPE_LABELS, type QuestionDraft } from "@/lib/questions/validation";
 import { invocacionesRestantes } from "@/lib/agent/invocation";
+import { questionStats, type QuestionStats } from "@/lib/questions/stats";
+import { reinforcementCandidates, weakPoints } from "@/lib/questions/weak-points";
 import { parseDateInput, todayInAppTimeZone } from "@/lib/dates";
 import { reviewState, type ReviewState } from "@/lib/game";
 import { AppShell } from "@/components/app/app-shell";
@@ -19,6 +21,7 @@ import { AccionesPregunta } from "./acciones-pregunta";
 import { AvisoEscriba, EscribaProvider } from "./escriba-context";
 import { EscribaForm } from "./escriba-form";
 import { BloquePregunta } from "./pregunta-form";
+import { PuntosDebiles } from "./puntos-debiles";
 
 // Tiempo máximo de esta página y de TODAS sus Server Actions en Vercel (ver
 // node_modules/next/dist/docs/.../route-segment-config/maxDuration.md). El
@@ -40,30 +43,9 @@ export async function generateMetadata({ params }: PageProps<"/materias/[id]">):
   return { title: subject ? `${subject.name} · Materias · Ember` : "Materias · Ember" };
 }
 
-// Lo que se cuenta de cada pregunta con sus intentos (QuestionAttempt).
-type Stats = { total: number; aciertos: number; ultimaCorrecta: boolean };
-
-// Estadísticas de todas las preguntas de la materia en UNA consulta: cuántas
-// veces salió cada una, cuántas se acertó y si el último intento fue
-// acertado. array_agg(... ORDER BY ...)[1] se queda con el más reciente. El
-// combate (paso 2) es quien escribe los intentos; hasta entonces sale vacío.
-// $queryRaw con plantilla: los ids viajan como parámetros, nunca pegados al SQL.
-async function loadStats(subjectId: string, userId: string): Promise<Map<string, Stats>> {
-  const rows = await prisma.$queryRaw<({ questionId: string } & Stats)[]>`
-    SELECT a."questionId",
-           COUNT(*)::int AS "total",
-           (COUNT(*) FILTER (WHERE a."correct"))::int AS "aciertos",
-           (array_agg(a."correct" ORDER BY a."createdAt" DESC, a."id" DESC))[1] AS "ultimaCorrecta"
-    FROM "QuestionAttempt" a
-    JOIN "Question" q ON q."id" = a."questionId"
-    WHERE q."subjectId" = ${subjectId} AND a."userId" = ${userId}
-    GROUP BY a."questionId"`;
-  return new Map(rows.map(({ questionId, ...stats }) => [questionId, stats]));
-}
-
 // "Acertada 2 de 3 veces · Vuelve en 3 días". Lo del repaso va al final: si
 // la fallaste ya lo dice el badge "Vuelve pronto", y una nueva no tiene fecha.
-function statsText(stats: Stats | undefined, review: ReviewState): string {
+function statsText(stats: QuestionStats | undefined, review: ReviewState): string {
   if (!stats) return "Aún no ha salido en un contraataque";
   const veces = stats.total === 1 ? "vez" : "veces";
   const ultima = stats.ultimaCorrecta ? "" : " · fallada en el último contraataque";
@@ -130,12 +112,13 @@ async function loadQuestions(subjectId: string) {
         options: true,
         correctIndex: true,
         explanation: true,
+        topic: true,
         reviewLevel: true,
         reviewDueAt: true,
         createdAt: true,
       },
     }),
-    // Tampoco su repaso: de una sellada no se enseña nada de eso.
+    // Tampoco su repaso ni su tema: de una sellada no se enseña nada de eso.
     prisma.question.findMany({
       where: { subjectId, sealed: true },
       select: { id: true, type: true, createdAt: true },
@@ -167,7 +150,7 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
     await Promise.all([
       loadRedemption(sessionUser),
       loadQuestions(subject.id),
-      loadStats(subject.id, sessionUser.id),
+      questionStats(subject.id, sessionUser.id),
       invocacionesRestantes(sessionUser.id),
     ]);
 
@@ -189,9 +172,18 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
           optionCount: 4,
           correctIndex: String(editada.correctIndex),
           explanation: editada.explanation ?? "",
+          topic: editada.topic ?? "",
         } satisfies QuestionDraft,
       }
     : null;
+
+  // Los temas de las REVELADAS, sin repetir y por orden alfabético: las
+  // sugerencias del campo Tema. Los de las selladas no se han leído.
+  const topics = [...new Set(revealed.flatMap((question) => (question.topic ? [question.topic] : [])))].sort(
+    (a, b) => a.localeCompare(b, "es"),
+  );
+  // Los Puntos débiles, solo con preguntas reveladas (ver weakPoints).
+  const weak = weakPoints(revealed, stats);
 
   return (
     <AppShell
@@ -211,97 +203,110 @@ export default async function MateriaPage({ params, searchParams }: PageProps<"/
       <EscribaProvider>
         <div className="flex flex-col gap-7 xl:grid xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start xl:gap-6">
           <div className="flex min-w-0 flex-col gap-4 xl:col-start-2 xl:row-start-1">
-            <EscribaForm subjectId={subject.id} remaining={remaining} />
+            <EscribaForm
+              subjectId={subject.id}
+              remaining={remaining}
+              failedQuestions={reinforcementCandidates(revealed, stats).length}
+            />
             {/* Plegado salvo si la materia está vacía o se está editando. */}
             <BloquePregunta
               subjectId={subject.id}
               edicion={edicion}
               abiertoInicial={questions.length === 0 || edicion !== null}
+              topics={topics}
             />
           </div>
 
-          <section
-            aria-labelledby="banco"
-            className="flex min-w-0 flex-col gap-3 xl:col-start-1 xl:row-start-1"
-          >
-            <Eyebrow id="banco">Banco de preguntas · {formatNumber(questions.length)}</Eyebrow>
-            <AvisoEscriba />
+          <div className="flex min-w-0 flex-col gap-7 xl:col-start-1 xl:row-start-1">
+            {/* Encima del banco. Con el banco vacío no hay nada que medir. */}
+            {questions.length > 0 && <PuntosDebiles data={weak} />}
 
-            {questions.length === 0 ? (
-              <EmptyState icon={<MessageCircleQuestion size={40} />} title="Aún no hay preguntas">
-                Invoca al escriba con tus apuntes o escribe la primera a mano. Mientras esta materia no
-                tenga preguntas, sus jefes contraatacarán con preguntas de autoevaluación.
-              </EmptyState>
-            ) : (
-              <>
-                <ul className="flex flex-col gap-3">
-                  {questions.map((question) => {
-                    if (question.sealed) {
+            <section aria-labelledby="banco" className="flex min-w-0 flex-col gap-3">
+              <Eyebrow id="banco">Banco de preguntas · {formatNumber(questions.length)}</Eyebrow>
+              <AvisoEscriba />
+
+              {questions.length === 0 ? (
+                <EmptyState icon={<MessageCircleQuestion size={40} />} title="Aún no hay preguntas">
+                  Invoca al escriba con tus apuntes o escribe la primera a mano. Mientras esta materia no
+                  tenga preguntas, sus jefes contraatacarán con preguntas de autoevaluación.
+                </EmptyState>
+              ) : (
+                <>
+                  <ul className="flex flex-col gap-3">
+                    {questions.map((question) => {
+                      if (question.sealed) {
+                        return (
+                          <TarjetaSellada
+                            key={question.id}
+                            id={question.id}
+                            typeLabel={QUESTION_TYPE_LABELS[question.type]}
+                            subjectName={subject.name}
+                            written={writtenText(question.createdAt, today)}
+                          />
+                        );
+                      }
+                      const questionStats = stats.get(question.id);
+                      // El repaso: "Vuelve pronto" si la fallaste (o esquivaste)
+                      // la última vez, "Dominada" en el nivel 5 y cuándo vuelve
+                      // en la línea de estadística.
+                      const review = reviewState(question.reviewLevel, question.reviewDueAt, now);
+                      const isEditing = question.id === edicion?.id;
                       return (
-                        <TarjetaSellada
+                        <li
                           key={question.id}
-                          id={question.id}
-                          typeLabel={QUESTION_TYPE_LABELS[question.type]}
-                          subjectName={subject.name}
-                          written={writtenText(question.createdAt, today)}
-                        />
-                      );
-                    }
-                    const questionStats = stats.get(question.id);
-                    // El repaso: "Vuelve pronto" si la fallaste (o esquivaste)
-                    // la última vez, "Dominada" en el nivel 5 y cuándo vuelve
-                    // en la línea de estadística.
-                    const review = reviewState(question.reviewLevel, question.reviewDueAt, now);
-                    const isEditing = question.id === edicion?.id;
-                    return (
-                      <li
-                        key={question.id}
-                        // Como cardStyles, pero con el borde dorado en la que se
-                        // está editando (cn no resolvería border-line contra
-                        // border-gold-bright).
-                        className={cn(
-                          "flex flex-col gap-3 rounded-[10px] border bg-surface px-5 py-4",
-                          isEditing ? "border-gold-bright" : "border-line",
-                        )}
-                      >
-                        <div className="flex flex-wrap gap-2">
-                          <Badge>{QUESTION_TYPE_LABELS[question.type]}</Badge>
-                          {question.source === "AGENT" && <Badge>Del agente</Badge>}
-                          {review.kind === "failed" && (
-                            <Badge tone="ember">Vuelve pronto</Badge>
+                          // Como cardStyles, pero con el borde dorado en la que se
+                          // está editando (cn no resolvería border-line contra
+                          // border-gold-bright).
+                          className={cn(
+                            "flex flex-col gap-3 rounded-[10px] border bg-surface px-5 py-4",
+                            isEditing ? "border-gold-bright" : "border-line",
                           )}
-                          {review.mastered && <Badge>Dominada</Badge>}
-                          {isEditing && <Badge tone="muted">Editando</Badge>}
-                        </div>
-                        {/* whitespace-pre-line: respeta los saltos de línea del
-                            enunciado. wrap-anywhere: una palabra larga sin
-                            espacios no desborda la tarjeta. */}
-                        <p className="text-base leading-[1.4] font-semibold whitespace-pre-line wrap-anywhere text-parchment">
-                          {question.prompt}
-                        </p>
-                        <p className="flex items-start gap-2 text-sm leading-[1.45] text-ash">
-                          <Check aria-hidden size={16} className="mt-0.5 shrink-0 text-smoke" />
-                          <span className="min-w-0 wrap-anywhere">
-                            <span className="sr-only">Respuesta correcta: </span>
-                            {question.options[question.correctIndex]}
-                          </span>
-                        </p>
-                        <AccionesPregunta
-                          questionId={question.id}
-                          stats={statsText(questionStats, review)}
-                          editHref={`/materias/${subject.id}?editar=${question.id}#formulario`}
-                        />
-                      </li>
-                    );
-                  })}
-                </ul>
-                <p className="text-[13px] leading-[1.5] text-smoke">
-                  Si una materia no tiene preguntas, sus jefes contraatacan con preguntas de
-                  autoevaluación.
-                </p>
-              </>
-            )}
-          </section>
+                        >
+                          <div className="flex flex-wrap gap-2">
+                            <Badge>{QUESTION_TYPE_LABELS[question.type]}</Badge>
+                            {question.source === "AGENT" && <Badge>Del agente</Badge>}
+                            {question.topic && (
+                              <Badge tone="muted" className="max-w-full">
+                                <span className="sr-only">Tema: </span>
+                                <span className="truncate">{question.topic}</span>
+                              </Badge>
+                            )}
+                            {review.kind === "failed" && (
+                              <Badge tone="ember">Vuelve pronto</Badge>
+                            )}
+                            {review.mastered && <Badge>Dominada</Badge>}
+                            {isEditing && <Badge tone="muted">Editando</Badge>}
+                          </div>
+                          {/* whitespace-pre-line: respeta los saltos de línea del
+                              enunciado. wrap-anywhere: una palabra larga sin
+                              espacios no desborda la tarjeta. */}
+                          <p className="text-base leading-[1.4] font-semibold whitespace-pre-line wrap-anywhere text-parchment">
+                            {question.prompt}
+                          </p>
+                          <p className="flex items-start gap-2 text-sm leading-[1.45] text-ash">
+                            <Check aria-hidden size={16} className="mt-0.5 shrink-0 text-smoke" />
+                            <span className="min-w-0 wrap-anywhere">
+                              <span className="sr-only">Respuesta correcta: </span>
+                              {question.options[question.correctIndex]}
+                            </span>
+                          </p>
+                          <AccionesPregunta
+                            questionId={question.id}
+                            stats={statsText(questionStats, review)}
+                            editHref={`/materias/${subject.id}?editar=${question.id}#formulario`}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="text-[13px] leading-[1.5] text-smoke">
+                    Si una materia no tiene preguntas, sus jefes contraatacan con preguntas de
+                    autoevaluación.
+                  </p>
+                </>
+              )}
+            </section>
+          </div>
         </div>
       </EscribaProvider>
     </AppShell>

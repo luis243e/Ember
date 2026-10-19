@@ -11,7 +11,10 @@
 // SOLO del servidor (baraja con node:crypto).
 import { randomPermutation } from "@/lib/questions/counterattack";
 import {
+  canonicalTopic,
+  MAX_TOPIC_LENGTH,
   MULTIPLE_CHOICE_OPTION_COUNT,
+  normalizeTopic,
   validarPregunta,
   type QuestionInput,
 } from "@/lib/questions/validation";
@@ -38,17 +41,28 @@ export type PreparadoEscriba = {
   discarded: number;
 };
 
+// Lo que se sabe del banco al preparar: los temas que ya tiene la materia
+// (para reutilizar sus mayúsculas) y el máximo de esta tanda (15 con apuntes,
+// 8 en el refuerzo).
+export type OpcionesPreparar = { existingTopics?: readonly (string | null)[]; max?: number };
+
 // raw: el JSON que devolvió el modelo, sin comprobar. existingPrompts: los
 // enunciados que ya hay en el banco de la materia, para no repetirlos.
-// Devuelve como mucho AGENT.maxQuestions, con las opciones de opción múltiple
-// ya barajadas.
-export function prepararPreguntas(raw: unknown, existingPrompts: readonly string[]): PreparadoEscriba {
+// Devuelve como mucho `max` (AGENT.maxQuestions si no se dice), con las
+// opciones de opción múltiple ya barajadas.
+export function prepararPreguntas(
+  raw: unknown,
+  existingPrompts: readonly string[],
+  { existingTopics = [], max = AGENT.maxQuestions }: OpcionesPreparar = {},
+): PreparadoEscriba {
   const list =
     typeof raw === "object" && raw !== null && Array.isArray((raw as { questions?: unknown }).questions)
       ? ((raw as { questions: unknown[] }).questions)
       : [];
 
   const seen = new Set(existingPrompts.map(claveEnunciado));
+  // Los temas ya vistos: los del banco y los de esta tanda, en ese orden.
+  const topics: (string | null)[] = [...existingTopics];
   const questions: QuestionInput[] = [];
   let discarded = 0;
 
@@ -65,11 +79,13 @@ export function prepararPreguntas(raw: unknown, existingPrompts: readonly string
       continue;
     }
     seen.add(key);
-    questions.push(question);
+    const topic = canonicalTopic(question.topic ?? null, topics);
+    topics.push(topic);
+    questions.push({ ...question, topic });
   }
 
-  // El escriba decide cuántas, pero nunca más de 15.
-  const kept = questions.slice(0, AGENT.maxQuestions);
+  // El escriba decide cuántas, pero nunca más del máximo.
+  const kept = questions.slice(0, max);
   discarded += questions.length - kept.length;
   return { questions: kept.map(barajarOpciones), discarded };
 }
@@ -77,7 +93,7 @@ export function prepararPreguntas(raw: unknown, existingPrompts: readonly string
 // Una pregunta del modelo, validada con las reglas del banco, o null.
 function validarDelEscriba(item: unknown): QuestionInput | null {
   if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
-  const { type, prompt, options, correctIndex, explanation } = item as Record<string, unknown>;
+  const { type, prompt, options, correctIndex, explanation, topic } = item as Record<string, unknown>;
 
   if (typeof type !== "string" || typeof prompt !== "string") return null;
   if (!Array.isArray(options) || !options.every((option) => typeof option === "string")) return null;
@@ -106,7 +122,16 @@ function validarDelEscriba(item: unknown): QuestionInput | null {
     correctIndex: String(correctIndex),
     explanation,
   });
-  return validation.ok ? validation.data : null;
+  return validation.ok ? { ...validation.data, topic: temaDelEscriba(topic) } : null;
+}
+
+// El tema que propone el modelo, o null. Si no es válido (no es un texto,
+// está vacío o pasa de MAX_TOPIC_LENGTH), la pregunta se queda SIN tema: el
+// tema es secundario y no compensa tirar una pregunta buena por él.
+function temaDelEscriba(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const topic = normalizeTopic(value);
+  return topic !== null && topic.length <= MAX_TOPIC_LENGTH ? topic : null;
 }
 
 // Los modelos tienden a poner la correcta siempre en el mismo sitio (muchas

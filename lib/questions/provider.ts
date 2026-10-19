@@ -14,7 +14,8 @@ export type { BattleQuestion } from "@/lib/questions/types";
 
 // Copia barajada de una lista (Fisher-Yates): cada orden es igual de probable.
 // Math.random basta, como en las tiradas de almas: no es un dato de seguridad.
-function shuffled<T>(items: readonly T[]): T[] {
+// La usa también la prueba de redención (lib/redemption-trial.ts).
+export function shuffled<T>(items: readonly T[]): T[] {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));

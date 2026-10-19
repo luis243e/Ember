@@ -9,14 +9,12 @@
 //   no va en el archivo "use server": todo lo que exporta ese archivo es una
 //   acción que cualquiera puede llamar con el userId que quiera.
 //
-// ORDEN DE BLOQUEO, en todas las transacciones de la app:
-//   tarea → vigilia → contraataque → usuario → misión de redención.
-// Al contestar una pregunta sellada, su fila va al final (contraataque →
-// usuario → pregunta); al retirarla, contraataque → pregunta.
+// ORDEN DE BLOQUEO, en todas las transacciones de la app (todos los caminos,
+// explicados en lib/locks.ts):
+//   tarea → vigilia → contraataque / prueba → usuario → misión → pregunta.
 // Quien no necesite alguna fila se la salta, pero nunca cambia el orden: así
 // dos peticiones simultáneas se ponen en fila en vez de esperarse la una a la
-// otra para siempre (interbloqueo). La revisión de jefes vencidos
-// (lib/redemption.ts) sigue el mismo orden sin vigilia ni contraataque.
+// otra para siempre (interbloqueo).
 import { Prisma, type Difficulty, type TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { todayDateInAppTimeZone, todayInAppTimeZone } from "@/lib/dates";
@@ -45,13 +43,15 @@ import {
   toOriginalIndex,
   toShownIndex,
 } from "@/lib/questions/counterattack";
+import { bloquearMision, bloquearUsuario } from "@/lib/locks";
 import { formatCountdown } from "@/app/mazmorra/batalla/[id]/countdown";
 
 // Lo que devuelven comenzar, abandonar y golpear. Si ok es false, error lleva
 // el mensaje que verá el usuario. Los campos opcionales solo los da
 // asestarGolpe: strikeSouls son las almas del golpe, victorySouls las de la
 // victoria (solo si el jefe cayó), recoveredSouls las que vuelven al cumplir
-// la misión de redención (solo si este golpe la cumplió), newLevel el nivel
+// la misión de redención (solo si este golpe la cumplió), trialGranted si el
+// golpe dio un intento de la prueba de redención, newLevel el nivel
 // alcanzado (solo si se subió) y embersSpent / embersLeft las brasas que
 // salvaron la llama y las que quedan (solo si alguna se gastó). lateFall: el
 // golpe contó, pero el jefe no murió y su día de entrega ya pasó (vigilia
@@ -65,6 +65,7 @@ export type ResultadoBatalla =
       strikeSouls?: number;
       victorySouls?: number;
       recoveredSouls?: number;
+      trialGranted?: boolean;
       newLevel?: number;
       embersSpent?: number;
       embersLeft?: number;
@@ -89,32 +90,8 @@ async function bloquearTarea(tx: Prisma.TransactionClient, taskId: string) {
   return rows[0];
 }
 
-// Lo mismo con la fila del usuario: la bloquea hasta el final de la
-// transacción y devuelve lo que hace falta para calcular almas, nivel,
-// llama y brasas. Va después de la tarea, la vigilia y el contraataque, y
-// antes de la misión (tarea → vigilia → contraataque → usuario → misión). Con
-// la fila bloqueada nadie más puede cambiar esos valores, así que se calculan
-// en el código y se escriben de una vez.
-async function bloquearUsuario(tx: Prisma.TransactionClient, userId: string) {
-  const rows = await tx.$queryRaw<
-    { souls: number; level: number; flame: number; lastStrikeDay: Date | null; embers: number }[]
-  >`
-    SELECT "souls", "level", "flame", "lastStrikeDay", "embers" FROM "User"
-    WHERE "id" = ${userId} FOR UPDATE`;
-  return rows[0];
-}
-
-// La misión de redención activa del usuario, bloqueada, o undefined si no
-// tiene. Va SIEMPRE la última, después del usuario: la revisión de jefes
-// vencidos la crea y la resuelve con el usuario ya bloqueado.
-async function bloquearMision(tx: Prisma.TransactionClient, userId: string) {
-  const rows = await tx.$queryRaw<
-    { id: string; vigilsDone: number; deadline: Date; soulsAtStake: number }[]
-  >`
-    SELECT "id", "vigilsDone", "deadline", "soulsAtStake" FROM "RedemptionMission"
-    WHERE "userId" = ${userId} AND "status" = 'ACTIVE' FOR UPDATE`;
-  return rows[0];
-}
+// El usuario y la misión se bloquean con bloquearUsuario y bloquearMision
+// (lib/locks.ts), que comparte la prueba de redención.
 
 // El contraataque, bloqueado, solo si es de ese usuario; undefined si no
 // existe o es de otro (la acción responde 404 sin distinguir). Va después de
@@ -274,7 +251,9 @@ export async function asestarGolpeDe(
     const owner = await bloquearUsuario(tx, userId);
     const mission = await bloquearMision(tx, userId);
     // Cómo avanza la misión lo decide SOLO advanceRedemption (lib/game.ts).
-    // null = no hay misión o su plazo ya pasó (la revisión la marcará).
+    // null = no hay misión o su plazo ya pasó (la revisión la marcará). En
+    // una misión TRIAL la vigilia nunca la cumple: da un intento de la prueba
+    // (vigilsDone − trialsUsed).
     const advance = mission ? advanceRedemption(mission, now) : null;
     let recoveredSouls = 0;
     if (mission && advance) {
@@ -326,6 +305,7 @@ export async function asestarGolpeDe(
         strikeSouls,
         victorySouls,
         recoveredSouls: recoveredSouls > 0 ? recoveredSouls : undefined,
+        ...(advance?.trialGranted && { trialGranted: true }),
         newLevel: leveledUp ? level : undefined,
         ...(flame.embersSpent > 0 && { embersSpent: flame.embersSpent, embersLeft: flame.embers }),
       },
@@ -487,10 +467,15 @@ export async function responderPreguntaDe(
       const counted = outcome === "correct" || outcome === "answered";
       const correctCount = counter.correctCount + (counted ? 1 : 0);
 
-      // 3. El usuario (después del contraataque), solo si cambian las almas o
-      // es la última pregunta (puede dar brasa). Lo que se resta nunca baja
-      // de nivel (applySoulsDelta), y el nivel se deduce de las almas con
-      // levelForSouls, igual que en el golpe.
+      // 3. El usuario (después del contraataque), si cambian las almas, si es
+      // la última pregunta (puede dar brasa) o si se va a crear un intento
+      // (una pregunta del banco). Lo último es por la clave foránea: crear el
+      // QuestionAttempt bloquea al usuario con FOR KEY SHARE (lib/locks.ts);
+      // sin bloquearlo antes, esquivar una pregunta del banco tendría la
+      // pregunta y esperaría al usuario, al revés que la prueba de redención
+      // (usuario → pregunta), y las dos podrían esperarse para siempre. Lo que
+      // se resta nunca baja de nivel (applySoulsDelta), y el nivel se deduce
+      // de las almas con levelForSouls, igual que en el golpe.
       // La brasa la decide SOLO emberForCounterattack (lib/game.ts), con el
       // usuario ya bloqueado: dos contraataques que terminan a la vez no
       // pueden pasar los dos del tope. Como se da en la misma transacción que
@@ -501,7 +486,7 @@ export async function responderPreguntaDe(
       let applied = 0;
       let newLevel: number | undefined;
       let ember: EmberSummary | undefined;
-      if (nominal !== 0 || isLast) {
+      if (nominal !== 0 || isLast || question?.questionId) {
         const owner = await bloquearUsuario(tx, userId);
         const next = applySoulsDelta(owner.souls, nominal);
         applied = next.applied;

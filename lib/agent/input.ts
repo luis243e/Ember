@@ -8,7 +8,12 @@ import type { AgentInput } from "@/lib/agent/gemini";
 import { comprobarPdf } from "@/lib/agent/pdf";
 import { AGENT, AGENT_ERRORS, normalizarApuntes } from "@/lib/agent/rules";
 
-export type EntradaLeida = { ok: true; input: AgentInput } | { ok: false; error: string };
+// Lo que pide la tarjeta: apuntes (texto o PDF) o reforzar. En el refuerzo
+// NO llega ninguna pregunta: qué preguntas se mandan lo decide el servidor
+// (lib/agent/reinforce.ts) al invocar.
+export type EscribaRequest = Exclude<AgentInput, { kind: "REINFORCE" }> | { kind: "REINFORCE" };
+
+export type EntradaLeida = { ok: true; input: EscribaRequest } | { ok: false; error: string };
 
 export async function leerEntrada(formData: FormData): Promise<EntradaLeida> {
   const kind = formData.get("kind");
@@ -34,5 +39,9 @@ export async function leerEntrada(formData: FormData): Promise<EntradaLeida> {
     return { ok: true, input: { kind: "PDF", data: bytes } };
   }
 
-  return { ok: false, error: "Elige si vas a pegar texto o subir un PDF." };
+  // Reforzar: nada más que el modo. Si la FormData trae otros campos
+  // (preguntas, ids...), se ignoran.
+  if (kind === "REINFORCE") return { ok: true, input: { kind: "REINFORCE" } };
+
+  return { ok: false, error: "Elige si vas a pegar texto, subir un PDF o reforzar tus puntos débiles." };
 }

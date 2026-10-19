@@ -12,6 +12,7 @@ import {
   MAX_EXPLANATION_LENGTH,
   MAX_OPTION_LENGTH,
   MAX_PROMPT_LENGTH,
+  MAX_TOPIC_LENGTH,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPES,
   TRUE_FALSE_OPTIONS,
@@ -25,6 +26,9 @@ type BloqueProps = {
   edicion: { id: string; valores: QuestionDraft } | null;
   // Abierto al cargar: si la materia no tiene preguntas o se está editando.
   abiertoInicial: boolean;
+  // Los temas de las preguntas REVELADAS de la materia, para las sugerencias
+  // del campo Tema (los de las selladas no salen del servidor).
+  topics: string[];
 };
 
 const BORRADOR_VACIO: QuestionDraft = {
@@ -34,6 +38,7 @@ const BORRADOR_VACIO: QuestionDraft = {
   optionCount: 4,
   correctIndex: "",
   explanation: "",
+  topic: "",
 };
 
 // Bloque plegable "Añadir pregunta a mano" (o "Editar pregunta"). Es un
@@ -41,7 +46,7 @@ const BORRADOR_VACIO: QuestionDraft = {
 // recalcula con cada render del servidor: si se recalculara, guardar la
 // primera pregunta de una materia lo cerraría de golpe (la materia ya
 // tendría preguntas).
-export function BloquePregunta({ subjectId, edicion, abiertoInicial }: BloqueProps) {
+export function BloquePregunta({ subjectId, edicion, abiertoInicial, topics }: BloqueProps) {
   const [abierto, setAbierto] = useState(abiertoInicial);
 
   // Al pulsar "Editar" en otra tarjeta, cambia edicion.id y el bloque se
@@ -75,13 +80,13 @@ export function BloquePregunta({ subjectId, edicion, abiertoInicial }: BloquePro
       <div className="px-5 pb-5 md:px-6 md:pb-6">
         {/* key: al pasar de crear a editar (o de una pregunta a otra), el
             formulario se vuelve a montar con los valores nuevos. */}
-        <PreguntaForm key={edicionId ?? "nueva"} subjectId={subjectId} edicion={edicion} />
+        <PreguntaForm key={edicionId ?? "nueva"} subjectId={subjectId} edicion={edicion} topics={topics} />
       </div>
     </details>
   );
 }
 
-function PreguntaForm({ subjectId, edicion }: Omit<BloqueProps, "abiertoInicial">) {
+function PreguntaForm({ subjectId, edicion, topics }: Omit<BloqueProps, "abiertoInicial">) {
   const estadoInicial: EstadoPregunta = { error: null, valores: edicion?.valores ?? BORRADOR_VACIO };
   const [estado, accion, enviando] = useActionState(
     edicion ? editarPregunta : crearPregunta,
@@ -244,6 +249,35 @@ function PreguntaForm({ subjectId, edicion }: Omit<BloqueProps, "abiertoInicial"
           defaultValue={valores.explanation}
           className={textareaStyles}
         />
+      </div>
+
+      {/* Tema: texto libre con sugerencias (datalist) de los temas que ya
+          tiene la materia. Si se escribe uno que ya existe con otras
+          mayúsculas, el servidor lo guarda como ya estaba. */}
+      <div className="flex flex-col gap-2">
+        <label htmlFor="topic" className={labelStyles}>
+          Tema (opcional)
+        </label>
+        <input
+          id="topic"
+          name="topic"
+          type="text"
+          list={topics.length > 0 ? "temas-materia" : undefined}
+          maxLength={MAX_TOPIC_LENGTH}
+          defaultValue={valores.topic ?? ""}
+          aria-describedby="topic-ayuda"
+          className={inputStyles}
+        />
+        {topics.length > 0 && (
+          <datalist id="temas-materia">
+            {topics.map((topic) => (
+              <option key={topic} value={topic} />
+            ))}
+          </datalist>
+        )}
+        <p id="topic-ayuda" className="text-xs leading-[1.45] text-smoke">
+          Por ejemplo, «Derivadas». Agrupa tus puntos débiles por tema.
+        </p>
       </div>
 
       {/* Se oculta mientras se envía: al volver a aparecer, el lector de

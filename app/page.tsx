@@ -25,7 +25,12 @@ import { Card, cardStyles } from "@/components/ui/card";
 import { Eyebrow } from "@/components/ui/eyebrow";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { cn } from "@/lib/cn";
-import { bossImageSrc, type BossKey } from "@/lib/game";
+import { bossImageSrc, REDEMPTION, type BossKey } from "@/lib/game";
+
+// Los números de la misión de redención, de lib/game.ts: si cambian allí, los
+// textos de la landing cambian con ellos.
+const { hours: REDEMPTION_HOURS, vigilsRequired: REDEMPTION_VIGILS } = REDEMPTION;
+const { questions: TRIAL_QUESTIONS, passWith: TRIAL_PASS } = REDEMPTION.trial;
 
 // Margen lateral de todas las franjas: 100 px a 1440 deja 1240 de contenido.
 const SECTION_X = "px-4 sm:px-6 lg:px-[100px]";
@@ -126,7 +131,7 @@ const FEATURES: {
     icon: Shield,
     title: "Misión de redención",
     description:
-      "Si una entrega vence con el jefe en pie, pierdes las almas de tu nivel actual, pero nunca el nivel. Tienes 48 horas y 2 vigilias para recuperarlas.",
+      `Si una entrega vence con el jefe en pie, pierdes las almas de tu nivel, nunca el nivel. Durante ${REDEMPTION_HOURS} horas, cada vigilia te da un intento de una prueba de ${TRIAL_QUESTIONS} preguntas de esa materia: con ${TRIAL_PASS} aciertos, vuelven (si tiene menos de ${TRIAL_QUESTIONS} preguntas, bastan ${REDEMPTION_VIGILS} vigilias).`,
     comingSoon: false,
   },
   {
@@ -174,7 +179,7 @@ const FAQS = [
   {
     question: "¿Y si se me pasa una entrega?",
     answer:
-      "El jefe cae y te quita las almas de tu nivel actual, nunca el nivel. Tienes 48 horas para recuperarlas con 2 vigilias.",
+      `El jefe cae y te quita las almas de tu nivel actual, nunca el nivel. Tienes ${REDEMPTION_HOURS} horas para recuperarlas: cada vigilia que completes te da un intento de la prueba de redención, ${TRIAL_QUESTIONS} preguntas de la materia de ese jefe. Con ${TRIAL_PASS} aciertos, las almas vuelven; si no, otra vigilia te da otro intento. Si esa materia tiene menos de ${TRIAL_QUESTIONS} preguntas, bastan ${REDEMPTION_VIGILS} vigilias.`,
   },
   {
     question: "¿Cuánto cuesta?",

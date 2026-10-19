@@ -6,7 +6,16 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient, type Difficulty, type QuestionType, type TaskStatus } from "@prisma/client";
 import { hashPassword } from "better-auth/crypto";
-import { BOSSES_BY_DIFFICULTY, levelForSouls, maxHpFor, HP_PER_BLOCK } from "@/lib/game";
+import {
+  BOSSES_BY_DIFFICULTY,
+  counterattackSouls,
+  levelForSouls,
+  maxHpFor,
+  HP_PER_BLOCK,
+  nextReview,
+  redemptionDeadline,
+  redemptionRuleFor,
+} from "@/lib/game";
 import { todayDateInAppTimeZone } from "@/lib/dates";
 import { TRUE_FALSE_OPTIONS } from "@/lib/questions/validation";
 import { assertLocalDatabase } from "@/scripts/local-only";
@@ -32,9 +41,16 @@ const HOUR_MS = 60 * 60 * 1000;
 const today = todayDateInAppTimeZone();
 const dayOffset = (days: number) => new Date(today.getTime() + days * DAY_MS);
 
-// 1.885 almas: nivel 4 (500 + 527 + 558 = 1.585) y 300 dentro del nivel, para
-// que la caída del jefe vencido tenga almas que quitar.
-const SOULS = 1_885;
+// 1.585 almas: justo el inicio del nivel 4 (500 + 527 + 558). Tenía 300 más,
+// pero las perdió al caer ante «Quiz de límites» y están en juego en la
+// misión de redención.
+const SOULS = 1_585;
+const SOULS_AT_STAKE = 300;
+
+// La caída: ayer a las 10:00 de Colombia (15:00 UTC). La vigilia de ayer a
+// las 15:00 (contra «Parcial de derivadas») es posterior, así que la misión
+// ya tiene una vigilia y, por tanto, un intento de la prueba.
+const FELL_AT = new Date(todayDateInAppTimeZone().getTime() - DAY_MS + 15 * HOUR_MS);
 
 type SeedVigil = { completedAt: Date; soulsEarned: number };
 type SeedTask = {
@@ -45,6 +61,8 @@ type SeedTask = {
   status: TaskStatus;
   vigils: SeedVigil[];
   victorySouls?: number;
+  // Solo en el que cayó: cuándo, y que abre la misión de redención.
+  failedAt?: Date;
 };
 
 // Una vigilia cumplida que terminó a las 15:00 de Colombia (20:00 UTC) del
@@ -83,14 +101,16 @@ const TASKS: SeedTask[] = [
     vigils: [],
   },
   {
-    // Vencido ayer y aún ALIVE: al abrir /mazmorra la revisión lo hace caer
-    // (FAILED), quita las 300 almas del nivel y empieza la misión de redención.
-    name: "Quiz de la Colonia",
-    subject: "historia",
-    dueInDays: -1,
+    // Ya caído (FAILED) ayer: su entrega era anteayer. Abre la misión de
+    // redención con prueba (Cálculo tiene 10 preguntas), que se ve en
+    // /mazmorra con 1 intento y el botón "Afrontar la prueba".
+    name: "Quiz de límites",
+    subject: "calculo",
+    dueInDays: -2,
     difficulty: "EASY",
-    status: "ALIVE",
+    status: "FAILED",
     vigils: [],
+    failedAt: FELL_AT,
   },
   {
     // Ya vencido por el jugador hace días: no sale en la mazmorra.
@@ -106,12 +126,18 @@ const TASKS: SeedTask[] = [
 
 // Banco de preguntas de Cálculo (todas MANUAL). Historia se queda sin
 // preguntas, para ver el estado vacío y las genéricas de autoevaluación.
+// answers: sus intentos, del más antiguo al más reciente (true = acertada),
+// para ver los Puntos débiles: Continuidad es el peor tema, Regla de la
+// cadena no sale (solo 2 respuestas), una pregunta sin tema, una dominada
+// (5 aciertos) y cuatro con 2 o más fallos. 25 respuestas en total.
 type SeedQuestion = {
   type: QuestionType;
   prompt: string;
   options: string[];
   correctIndex: number;
   explanation?: string;
+  topic: string | null;
+  answers: boolean[];
 };
 
 const CALCULO_QUESTIONS: SeedQuestion[] = [
@@ -125,6 +151,8 @@ const CALCULO_QUESTIONS: SeedQuestion[] = [
       "La distancia al origen",
     ],
     correctIndex: 1,
+    topic: "Derivadas",
+    answers: [true, true, true, true, true],
   },
   {
     type: "TRUE_FALSE",
@@ -132,6 +160,8 @@ const CALCULO_QUESTIONS: SeedQuestion[] = [
     options: TRUE_FALSE_OPTIONS,
     correctIndex: 1,
     explanation: "|x| es continua en 0, pero no es derivable ahí: tiene un pico.",
+    topic: "Continuidad",
+    answers: [false, false, true],
   },
   {
     type: "MULTIPLE_CHOICE",
@@ -139,18 +169,68 @@ const CALCULO_QUESTIONS: SeedQuestion[] = [
     options: ["x", "2x", "x³ / 3", "2"],
     correctIndex: 1,
     explanation: "Regla de la potencia: la derivada de xⁿ es n·xⁿ⁻¹.",
+    topic: "Reglas de derivación",
+    answers: [true, false],
   },
   {
     type: "TRUE_FALSE",
     prompt: "La derivada de una constante es 0.",
     options: TRUE_FALSE_OPTIONS,
     correctIndex: 0,
+    topic: "Reglas de derivación",
+    answers: [true, true],
   },
   {
     type: "MULTIPLE_CHOICE",
     prompt: "¿Cuál es la derivada de sen(x)?",
     options: ["cos(x)", "-cos(x)", "-sen(x)", "tan(x)"],
     correctIndex: 0,
+    topic: "Derivadas trigonométricas",
+    answers: [false, true, false],
+  },
+  {
+    type: "MULTIPLE_CHOICE",
+    prompt: "¿Cuál es la derivada de cos(x)?",
+    options: ["-sen(x)", "sen(x)", "cos(x)", "-cos(x)"],
+    correctIndex: 0,
+    explanation: "La derivada del coseno es menos el seno.",
+    topic: "Derivadas trigonométricas",
+    answers: [true],
+  },
+  {
+    type: "MULTIPLE_CHOICE",
+    prompt: "¿Cuál es la derivada de sen(2x)?",
+    options: ["2cos(2x)", "cos(2x)", "-2cos(2x)", "2sen(2x)"],
+    correctIndex: 0,
+    explanation: "Regla de la cadena: la derivada de sen(u) es cos(u)·u′, y aquí u′ = 2.",
+    topic: "Regla de la cadena",
+    answers: [false, false],
+  },
+  {
+    type: "TRUE_FALSE",
+    prompt: "La función |x| es derivable en x = 0.",
+    options: TRUE_FALSE_OPTIONS,
+    correctIndex: 1,
+    explanation: "Sus derivadas laterales en 0 son −1 y 1: no coinciden.",
+    topic: "Continuidad",
+    answers: [false, false, false],
+  },
+  {
+    type: "MULTIPLE_CHOICE",
+    prompt: "¿Cuál es la derivada de eˣ?",
+    options: ["eˣ", "x·eˣ⁻¹", "ln(x)", "1"],
+    correctIndex: 0,
+    topic: "Reglas de derivación",
+    answers: [false],
+  },
+  {
+    type: "MULTIPLE_CHOICE",
+    prompt: "¿Cuál es el límite de sen(x)/x cuando x tiende a 0?",
+    options: ["1", "0", "∞", "No existe"],
+    correctIndex: 0,
+    // Sin tema: sale como "Sin tema" en los Puntos débiles.
+    topic: null,
+    answers: [true, false, true],
   },
 ];
 
@@ -203,15 +283,36 @@ async function main(): Promise<void> {
       historia: await tx.subject.create({ data: { name: "Historia", userId: user.id } }),
     };
 
-    // Una a una y con un minuto de diferencia: el banco las ordena de la más
-    // nueva a la más antigua, y así sale la última de la lista arriba.
-    for (const [index, question] of CALCULO_QUESTIONS.entries()) {
-      await tx.question.create({
+    // Una a una y con un minuto de diferencia, hace 60 días (antes de sus
+    // intentos): el banco las ordena de la más nueva a la más antigua, y así
+    // sale la última de la lista arriba.
+    // Los intentos, uno cada 3 días hasta ayer (a las 16:00 de Colombia), y
+    // el repaso que dejarían: se repiten con nextReview, la misma regla que
+    // la batalla. Sin vigilia (studySessionId null).
+    for (const [index, { answers, ...question }] of CALCULO_QUESTIONS.entries()) {
+      let review: { reviewLevel: number; reviewDueAt: Date | null } = { reviewLevel: 0, reviewDueAt: null };
+      const attempts = answers.map((correct, i) => {
+        const at = new Date(dayOffset(-1 - (answers.length - 1 - i) * 3).getTime() + 21 * HOUR_MS);
+        review = nextReview(review.reviewLevel, correct, at);
+        const kind = question.type;
+        return {
+          userId: user.id,
+          chosenIndex: correct ? question.correctIndex : (question.correctIndex + 1) % question.options.length,
+          correct,
+          soulsDelta: counterattackSouls(kind, correct ? "correct" : "wrong"),
+          createdAt: at,
+        };
+      });
+      const created = await tx.question.create({
         data: {
           ...question,
+          ...review,
           subjectId: subjects.calculo.id,
-          createdAt: new Date(Date.now() - (CALCULO_QUESTIONS.length - index) * 60 * 1000),
+          createdAt: new Date(dayOffset(-60).getTime() + index * 60 * 1000),
         },
+      });
+      await tx.questionAttempt.createMany({
+        data: attempts.map((attempt) => ({ ...attempt, questionId: created.id })),
       });
     }
 
@@ -230,8 +331,25 @@ async function main(): Promise<void> {
           // Alterna entre los dos jefes de cada dificultad.
           bossKey: options[index % options.length],
           victorySouls: seed.victorySouls ?? null,
+          failedAt: seed.failedAt ?? null,
         },
       });
+
+      // La misión que abrió su caída: TRIAL (la regla que se fija al caer
+      // con 5 o más preguntas en la materia), con la vigilia de después.
+      if (seed.failedAt) {
+        await tx.redemptionMission.create({
+          data: {
+            userId: user.id,
+            taskId: task.id,
+            soulsAtStake: SOULS_AT_STAKE,
+            rule: redemptionRuleFor(CALCULO_QUESTIONS.length),
+            vigilsDone: 1,
+            fellAt: seed.failedAt,
+            deadline: redemptionDeadline(seed.failedAt),
+          },
+        });
+      }
 
       for (const vigil of seed.vigils) {
         const endsAt = vigil.completedAt;
@@ -252,7 +370,11 @@ async function main(): Promise<void> {
 
   console.log(`Seed listo: ${EMAIL} / ${PASSWORD}`);
   console.log(`  ${TASKS.length} jefes en 2 materias, ${SOULS} almas, llama 4 (en peligro) y 1 brasa.`);
-  console.log(`  ${CALCULO_QUESTIONS.length} preguntas en Cálculo; Historia sin preguntas.`);
+  console.log(`  Misión de redención con prueba: ${SOULS_AT_STAKE} almas en juego y 1 intento.`);
+  const answers = CALCULO_QUESTIONS.reduce((sum, question) => sum + question.answers.length, 0);
+  console.log(
+    `  ${CALCULO_QUESTIONS.length} preguntas en Cálculo con temas y ${answers} respuestas; Historia sin preguntas.`,
+  );
 }
 
 main()

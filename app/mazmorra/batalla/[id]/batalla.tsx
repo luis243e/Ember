@@ -98,6 +98,9 @@ export function Batalla({
   // Almas devueltas por la misión de redención, si el último golpe la
   // cumplió. Como el nivel, solo vive aquí y en el momento.
   const [recoveredSouls, setRecoveredSouls] = useState<number | null>(null);
+  // El último golpe dio un intento de la prueba de redención (misión TRIAL).
+  // Como lo demás, solo vive aquí y en el momento.
+  const [trialGranted, setTrialGranted] = useState(false);
   // Brasas que salvaron la llama con el último golpe (y las que quedan).
   // Como el nivel, solo vive aquí y en el momento: el golpe ya escribió la
   // llama, y la base no recuerda que se gastó una.
@@ -200,6 +203,7 @@ export function Batalla({
     setError(null);
     setNewLevel(null);
     setRecoveredSouls(null);
+    setTrialGranted(false);
     setEmberSaved(null);
     startTransition(async () => {
       const result = await action(task.id);
@@ -226,6 +230,7 @@ export function Batalla({
         setHitting(true);
         setNewLevel(result.newLevel ?? null);
         setRecoveredSouls(result.recoveredSouls ?? null);
+        setTrialGranted(result.trialGranted === true);
         const saved = result.embersSpent
           ? { spent: result.embersSpent, left: result.embersLeft ?? 0 }
           : null;
@@ -236,6 +241,7 @@ export function Batalla({
           (result.recoveredSouls
             ? ` Misión de redención cumplida: recuperas ${formatNumber(result.recoveredSouls)} almas.`
             : "") +
+          (result.trialGranted ? ` ${TRIAL_GRANTED_TEXT}` : "") +
           (result.newLevel ? ` Has alcanzado el nivel ${result.newLevel}.` : "") +
           (saved ? ` ${emberSavedText(saved.spent, saved.left).join(" ")}` : "");
         if (result.defeated) {
@@ -565,6 +571,7 @@ export function Batalla({
                     </p>
                   )}
                   {recoveredSouls !== null && <Recovered souls={recoveredSouls} />}
+                  {trialGranted && <TrialGranted />}
                   {newLevel && <LevelUp level={newLevel} />}
                 </div>
               )}
@@ -584,6 +591,7 @@ export function Batalla({
                 no, ni en el instante en que llega la respuesta y la página
                 aún no se ha repintado. */}
             {recoveredSouls !== null && !justDefeated && <Recovered souls={recoveredSouls} />}
+            {trialGranted && !justDefeated && <TrialGranted />}
             {newLevel && !justDefeated && <LevelUp level={newLevel} />}
             {emberSaved && !justDefeated && (
               <EmberSavedNotice spent={emberSaved.spent} left={emberSaved.left} />
@@ -623,6 +631,24 @@ export function Batalla({
         {announcement}
       </p>
     </div>
+  );
+}
+
+// El golpe dio un intento de la prueba de redención: se dice y se enlaza a
+// la mazmorra, donde está la tarjeta con el botón.
+const TRIAL_GRANTED_TEXT = "Has ganado un intento de la prueba de redención.";
+
+function TrialGranted() {
+  return (
+    <p className="text-center text-[15px] leading-normal font-semibold text-gold-bright @2xl:text-[17px]">
+      {TRIAL_GRANTED_TEXT}{" "}
+      <Link
+        href="/mazmorra"
+        className={cn("rounded-sm underline underline-offset-2", FOCUS_RING)}
+      >
+        Afróntala desde la mazmorra
+      </Link>
+    </p>
   );
 }
 

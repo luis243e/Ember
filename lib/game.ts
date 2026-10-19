@@ -2,7 +2,7 @@
 // usen los mismos números.
 // "import type" no carga Prisma: solo trae el tipo, que desaparece al
 // compilar. Por eso este archivo también se puede usar en el navegador.
-import type { Difficulty } from "@prisma/client";
+import type { Difficulty, RedemptionRule } from "@prisma/client";
 import { parseDateInput, startOfTodayInAppTimeZone, todayDateInAppTimeZone } from "@/lib/dates";
 
 // Vida que quita cada bloque de estudio.
@@ -470,9 +470,40 @@ export function flameAfterStrike(
 // del nivel actual (una sola vez) y empieza una misión para recuperarlas.
 
 // Lo que hace falta para cumplir la misión y el plazo para hacerlo, contado
-// desde la caída. ESTOS NÚMEROS Y advanceRedemption() SON LO ÚNICO QUE HAY
-// QUE CAMBIAR cuando la condición sea otra (fase del agente: preguntas).
-export const REDEMPTION = { vigilsRequired: 2, hours: 48 } as const;
+// desde la caída. ESTOS NÚMEROS, redemptionRuleFor(), advanceRedemption() y
+// trialPassed() SON LA CONDICIÓN DE LA MISIÓN: no repartirla por el código.
+//
+// Desde la Fase 3 hay tres reglas (RedemptionMission.rule), y cada misión
+// guarda la suya desde que empieza:
+//   - TRIAL: cada vigilia cumplida a tiempo (contra cualquier jefe) da UN
+//     intento de la prueba de redención: `trial.questions` preguntas del banco
+//     de la materia del jefe caído; se aprueba con `trial.passWith` aciertos
+//     y las almas vuelven. Suspender gasta el intento; otro pide otra vigilia.
+//   - FEW_QUESTIONS: la materia tenía menos de `trial.questions` preguntas al
+//     caer: no hay prueba posible, bastan `vigilsRequired` vigilias.
+//   - LEGACY: misiones de antes de la Fase 3: como FEW_QUESTIONS.
+export const REDEMPTION = {
+  vigilsRequired: 2,
+  hours: 48,
+  trial: { questions: 5, passWith: 4 },
+} as const;
+
+// La regla de una misión que empieza ahora, según las preguntas que tiene el
+// banco de la materia del jefe caído (selladas incluidas).
+export function redemptionRuleFor(bankSize: number): Exclude<RedemptionRule, "LEGACY"> {
+  return bankSize >= REDEMPTION.trial.questions ? "TRIAL" : "FEW_QUESTIONS";
+}
+
+// Intentos de la prueba que quedan: cada vigilia da uno, y empezar la prueba
+// gasta uno. Solo en TRIAL.
+export function trialAttemptsLeft(mission: { rule: RedemptionRule; vigilsDone: number; trialsUsed: number }): number {
+  return mission.rule === "TRIAL" ? Math.max(mission.vigilsDone - mission.trialsUsed, 0) : 0;
+}
+
+// ¿Aprobada? Aciertos de la prueba, contra el mínimo.
+export function trialPassed(correct: number): boolean {
+  return correct >= REDEMPTION.trial.passWith;
+}
 
 // Horas que siguen saliendo los avisos al entrar ("Has recuperado tus almas",
 // "Tus almas se han desvanecido", "Has caído ante…") después de que pase lo
@@ -497,14 +528,67 @@ export function redemptionDeadline(fellAt: Date): Date {
 // LA regla de cómo avanza la misión con cada golpe aceptado (una vigilia
 // cumplida contra cualquier jefe). null = el golpe no cuenta porque el plazo
 // ya pasó (la revisión la marcará EXPIRED). completed = con este golpe se
-// cumple y las almas vuelven.
+// cumple y las almas vuelven (solo LEGACY y FEW_QUESTIONS). trialGranted =
+// este golpe da un intento de la prueba (solo TRIAL: una vigilia nunca la
+// cumple por sí sola).
 export function advanceRedemption(
-  mission: { vigilsDone: number; deadline: Date },
+  mission: { rule: RedemptionRule; vigilsDone: number; deadline: Date },
   now: Date,
-): { vigilsDone: number; completed: boolean } | null {
+): { vigilsDone: number; completed: boolean; trialGranted: boolean } | null {
   if (now.getTime() >= mission.deadline.getTime()) return null;
   const vigilsDone = mission.vigilsDone + 1;
-  return { vigilsDone, completed: vigilsDone >= REDEMPTION.vigilsRequired };
+  if (mission.rule === "TRIAL") return { vigilsDone, completed: false, trialGranted: true };
+  return { vigilsDone, completed: vigilsDone >= REDEMPTION.vigilsRequired, trialGranted: false };
+}
+
+// Lo que la prueba necesita saber de cada pregunta del banco para elegir: el
+// repaso y cuántas veces se ha fallado (QuestionAttempt).
+export type TrialCandidate = ReviewCandidate & { fails: number };
+
+// LA regla de qué preguntas salen en la prueba de redención: devuelve los ids
+// de las elegidas (como mucho REDEMPTION.trial.questions, sin repetir) en el
+// orden en que salen:
+//   1. las de nivel 0 después de fallarlas (falladas la última vez), las de
+//      más fallos antes;
+//   2. las más falladas (al menos un fallo), de más a menos;
+//   3. las que tocan (fecha ≤ ahora), la más antigua antes;
+//   4. las nuevas (sin fecha, selladas incluidas), al azar;
+//   5. y si aún faltan, las que vuelven antes.
+// Como pickForCounterattack: `shuffle` se pasa para probarlo sin azar y el id
+// desempata.
+export function pickForTrial(
+  candidates: readonly TrialCandidate[],
+  now: Date,
+  shuffle: <T>(items: readonly T[]) => T[],
+): string[] {
+  const byId = (a: TrialCandidate, b: TrialCandidate) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const time = (c: TrialCandidate) => c.reviewDueAt!.getTime();
+  const nowMs = now.getTime();
+  const taken = new Set<string>();
+  const chosen: string[] = [];
+  const take = (list: readonly TrialCandidate[]) => {
+    for (const c of list) {
+      if (chosen.length >= REDEMPTION.trial.questions) return;
+      if (taken.has(c.id)) continue;
+      taken.add(c.id);
+      chosen.push(c.id);
+    }
+  };
+  const byFails = (a: TrialCandidate, b: TrialCandidate) => b.fails - a.fails;
+  take(candidates.filter(isReviewAfterFail).sort((a, b) => byFails(a, b) || time(a) - time(b) || byId(a, b)));
+  take(candidates.filter((c) => c.fails > 0).sort((a, b) => byFails(a, b) || byId(a, b)));
+  take(
+    candidates
+      .filter((c) => c.reviewDueAt !== null && time(c) <= nowMs)
+      .sort((a, b) => time(a) - time(b) || byId(a, b)),
+  );
+  take(shuffle(candidates.filter((c) => c.reviewDueAt === null)));
+  take(
+    candidates
+      .filter((c) => c.reviewDueAt !== null && time(c) > nowMs)
+      .sort((a, b) => time(a) - time(b) || byId(a, b)),
+  );
+  return chosen;
 }
 
 // Horas que le quedan a la misión, hacia arriba: con 20 minutos dice 1 h,

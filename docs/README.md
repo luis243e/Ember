@@ -11,10 +11,10 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `main` se despliega solo.
 - **Stack:** Next.js 16.3.8 (App Router) + React 19 + TypeScript + Tailwind 4,
   Prisma 6.19.3, PostgreSQL en Supabase y Better Auth 1.7.7.
-- **Base de datos:** 12 tablas (ver [Modelo de datos](#modelo-de-datos)),
-  creadas con 15 migraciones (la 14.ª, `20261012183227_repaso`, y la 15.ª,
-  `20261014194417_brasa`, solo en la base local; la 12.ª y la 13.ª ya están
-  en `main`, commits `6026efc` y `53e2712`).
+- **Base de datos:** 13 tablas (ver [Modelo de datos](#modelo-de-datos)),
+  creadas con 16 migraciones (la 14.ª, `20261012183227_repaso`, la 15.ª,
+  `20261014194417_brasa`, y la 16.ª, `20261018235832_fase3`, solo en la base
+  local; la 12.ª y la 13.ª ya están en `main`, commits `6026efc` y `53e2712`).
   RLS activado en todas, y en producción también en `_prisma_migrations` (a
   mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
@@ -27,8 +27,14 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261014194417_brasa` (14 oct, sin commit;
-  solo en la base local): añade `User.embers` (por defecto 0, con un `CHECK`
+- **Migraciones:** la última es `20261018235832_fase3` (18 oct, sin commit;
+  solo en la base local): crea el enum `RedemptionRule`, añade `REINFORCE` a
+  `AgentInputKind`, `Question.topic` (opcional), `RedemptionMission.rule` (por
+  defecto `LEGACY`: las misiones que ya existen siguen con 2 vigilias) y
+  `RedemptionMission.trialsUsed` (por defecto 0), y crea `RedemptionTrial`
+  (con RLS). A mano: un índice único parcial (una prueba abierta por misión) y
+  un `CHECK` (`trialsUsed` entre 0 y `vigilsDone`). Solo añade cosas. La
+  anterior, `20261014194417_brasa` (14 oct, sin commit; solo en la base local): añade `User.embers` (por defecto 0, con un `CHECK`
   a mano de 0 a 2) y `Counterattack.bossDifficulty` (opcional; `null` en los
   contraataques de antes). Solo añade cosas. La anterior,
   `20261012183227_repaso` (12 oct, sin commit; solo en la base local): añade `Question.reviewLevel` (por defecto 0, con un
@@ -72,6 +78,33 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis. `GMAIL_USER` y `GMAIL_APP_PASSWORD` ya están en Vercel
   (*Production*). Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
+- **Fase 3 completa (18 oct, sin commit): el agente más a fondo.**
+  - **Temas y puntos débiles:** cada pregunta puede tener un tema (hasta 60
+    caracteres; el escriba lo propone reutilizando los de la materia, o se
+    escribe a mano con sugerencias). En `/materias/[id]`, encima del banco, el
+    panel **Puntos débiles**: el porcentaje de aciertos de la materia, los
+    temas de peor a mejor (con 3 respuestas o más), «Las que más fallas»
+    (reveladas con 2 fallos o más) y las dominadas; con menos de 5 respuestas,
+    un estado vacío.
+  - **Refuerzo dirigido:** «Reforzar puntos débiles» en la tarjeta del
+    escriba. El servidor elige hasta 10 preguntas reveladas con fallos (hacen
+    falta 3) y Gemini escribe de 3 a 8 nuevas sobre los mismos conceptos. A
+    Google solo van esas preguntas (tema, enunciado, correcta y explicación),
+    delimitadas como los apuntes. Cuenta para el límite de 3 al día.
+  - **La prueba de redención:** en una misión `TRIAL`, cada vigilia cumplida a
+    tiempo da un intento de una prueba de 5 preguntas del banco de la materia
+    del jefe caído (`/mazmorra/redencion`); con 4 aciertos vuelven las almas.
+    Es práctica real (intentos, repaso y sello) sin almas ni brasas. Tras cada
+    respuesta, la correcta y la explicación; al suspender, la lista de las
+    falladas. Si la materia tenía menos de 5 preguntas al caer
+    (`FEW_QUESTIONS`) o la misión es de antes (`LEGACY`), 2 vigilias.
+  - **Arreglado un interbloqueo posible** por la clave foránea de
+    `QuestionAttempt` (ver las reglas de bloqueo).
+  - Probado en local (scripts `probar-temas`, `probar-refuerzo` y
+    `probar-redencion`, todos los anteriores, Chrome y 320 px). **La llamada
+    real a Gemini del refuerzo queda pendiente**: el 18 oct Gemini no
+    respondía, tampoco al camino de siempre. Detalles en
+    [2026-10-18-fase-3-el-agente.md](sesiones/2026-10-18-fase-3-el-agente.md).
 - **Fase 2 completa (14 oct).** Banco de preguntas, contraataque, escriba,
   preguntas que vuelven y brasa.
 - **Pulido antes de la Fase 3 (14 oct, sin commit):** «¿Olvidaste tu
@@ -127,7 +160,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   REST de Gemini, sin dependencias). Además, **el contraataque lanza 1, 2 o 3
   preguntas según la dificultad del jefe** (fácil, media, difícil). Probado
   en local (script de 113 comprobaciones con el payload, 2 llamadas reales a
-  Gemini y Chrome, también a 320 px). Un 503 de Gemini se reintenta una vez.
+  Gemini y Chrome, también a 320 px). Un 503 de Gemini se reintenta una vez
+  (o pasa al modelo de reserva `GEMINI_MODEL_FALLBACK`, si se configura).
   `GEMINI_API_KEY` y `GEMINI_MODEL` ya están en Vercel (*Production*).
   Detalles en
   [2026-10-11-el-escriba.md](sesiones/2026-10-11-el-escriba.md).
@@ -205,7 +239,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `FAILED` cuando termina su día de entrega en hora de Colombia (el día de
   la entrega todavía se combate). Al caer, se pierden las almas del nivel
   actual (el nivel no baja) y, si había, empieza una misión: 2 vigilias
-  cumplidas en 48 h las devuelven. Sin tareas programadas: la revisión
+  cumplidas en 48 h las devuelven (desde la Fase 3, la prueba de redención:
+  ver arriba). Sin tareas programadas: la revisión
   (`lib/redemption.ts`) se hace al cargar mazmorra, materias, invocar y
   batalla. La mazmorra enseña la tarjeta de la misión; las páginas con
   `AppShell`, los avisos de caída, almas recuperadas y almas desvanecidas.
@@ -259,15 +294,16 @@ migraciones, y el schema lo avisa con un comentario.
 
 | Tabla | Qué guarda | Relaciones |
 |---|---|---|
-| `User` | Usuario y su personaje: nivel, almas, llama, brasas (`embers`, 0–2, con un `CHECK` a mano), límite de correos | Tiene materias, vigilias, misiones, intentos, contraataques, invocaciones del escriba, sesiones y cuentas |
+| `User` | Usuario y su personaje: nivel, almas, llama, brasas (`embers`, 0–2, con un `CHECK` a mano), límite de correos | Tiene materias, vigilias, misiones, pruebas de redención, intentos, contraataques, invocaciones del escriba, sesiones y cuentas |
 | `Subject` | Materia ("Cálculo") | De un `User`. Tiene jefes (`Task`) y preguntas (`Question`) |
 | `Task` | Jefe: vida, dificultad, fecha de entrega, estado, `bossKey` | De una `Subject` (no tiene `userId`: se filtra por la materia) |
 | `StudySession` | Vigilia de 25 min y sus almas | De una `Task` y de un `User`. Una sola abierta por usuario (índice parcial) |
-| `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo | De un `User` y una `Task`. Una sola `ACTIVE` por usuario (índice parcial) |
-| `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation`, `sealed` (del escriba y aún sin contestar), `reviewLevel` (0–5) y `reviewDueAt` (cuándo vuelve; `null` = nueva) | De una `Subject` (`Cascade`). Cinco `CHECK` a mano (el cuarto: solo las `AGENT` pueden estar selladas; el quinto: `reviewLevel` entre 0 y 5) |
-| `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque: `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta` (las aplicadas). La escribe `responderPreguntaDe` (`chosenIndex` en el orden ORIGINAL de la pregunta); las genéricas no | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
+| `RedemptionMission` | Misión tras caer ante un jefe: almas en juego, plazo, `rule` (`LEGACY` / `FEW_QUESTIONS` / `TRIAL`, fijada al caer), `vigilsDone` y `trialsUsed` (intentos = `vigilsDone − trialsUsed`) | De un `User` y una `Task` (la materia de la prueba es la de la tarea). Una sola `ACTIVE` por usuario (índice parcial). `CHECK` a mano: `trialsUsed` entre 0 y `vigilsDone` |
+| `RedemptionTrial` | Un intento de la prueba de redención: `items` (`jsonb`, el formato del contraataque y, en las contestadas, `correct`), `answered`, `correctCount`, `passed` (`null` = en curso), `finishedAt` | De una `RedemptionMission` y un `User` (`Cascade`). Una sola abierta por misión (índice único parcial) |
+| `Question` | Pregunta del banco: `type` (`MULTIPLE_CHOICE` / `TRUE_FALSE`), `source` (`MANUAL` / `AGENT`), `prompt`, `options` (`String[]`: 4, o `["Verdadero", "Falso"]`), `correctIndex`, `explanation`, `sealed` (del escriba y aún sin contestar), `reviewLevel` (0–5), `reviewDueAt` (cuándo vuelve; `null` = nueva) y `topic` (tema, opcional, hasta 60) | De una `Subject` (`Cascade`). Cinco `CHECK` a mano (el cuarto: solo las `AGENT` pueden estar selladas; el quinto: `reviewLevel` entre 0 y 5) |
+| `QuestionAttempt` | Cada vez que una pregunta sale en un contraataque o en una prueba de redención (`studySessionId` `null` y `soulsDelta` 0): `chosenIndex` (`null` = esquivó), `correct`, `soulsDelta` (las aplicadas). La escribe `responderPreguntaDe` (`chosenIndex` en el orden ORIGINAL de la pregunta); las genéricas no | De una `Question` y un `User` (`Cascade`) y, opcional, de una `StudySession` (`SetNull`) |
 | `Counterattack` | El contraataque de una vigilia: `items` (`jsonb`: por pregunta, `ref` = id de `Question` o `generic:<clave>`, `order` = permutación de sus opciones y, solo si es de repaso, `review: true`), `answered`, `correctCount`, `soulsDelta`, `finishedAt`, `bossDifficulty` (la del jefe al crearlo; decide la brasa; `null` = de antes de la brasa) | De una `StudySession` (`@unique`: uno por vigilia; `Cascade`) y un `User` (`Cascade`) |
-| `AgentInvocation` | Cada invocación del escriba: `status` (`PENDING` / `OK` / `FAILED`), `inputKind` (`TEXT` / `PDF`), `questionsCreated`, `createdAt`, `finishedAt`. Para el límite diario. **No guarda los apuntes, ni el PDF, ni el nombre del archivo** | De un `User` y una `Subject` (`Cascade`) |
+| `AgentInvocation` | Cada invocación del escriba: `status` (`PENDING` / `OK` / `FAILED`), `inputKind` (`TEXT` / `PDF` / `REINFORCE`), `questionsCreated`, `createdAt`, `finishedAt`. Para el límite diario. **No guarda los apuntes, ni el PDF, ni el nombre del archivo** | De un `User` y una `Subject` (`Cascade`) |
 | `Session`, `Account`, `Verification` | Tablas de Better Auth (sesiones, contraseña, enlaces de verificación) | `Session` y `Account` de un `User` |
 
 Las preguntas genéricas de autoevaluación **no están en la base**: viven en
@@ -300,16 +336,19 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
    | `EMBER_TEST_VIGIL_SECONDS` | Opcional: vigilias de N segundos para probar (solo en `next dev`) |
    | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Opcionales: la cuenta de Gmail que envía los correos y su contraseña de aplicación. Vacías, el correo (con el enlace) sale en la consola de `npm run dev` |
    | `GEMINI_API_KEY`, `GEMINI_MODEL` | El escriba: la clave de Google AI Studio (secreta) y el nombre del modelo de Gemini. Vacías, la tarjeta dice «El escriba no está disponible» |
+   | `GEMINI_MODEL_FALLBACK` | Opcional: modelo de reserva. Si el principal da 503 o no responde en 25 s, se prueba este (dentro de los mismos 45 s). Vacía = sin reserva |
    | `EMBER_FAKE_AGENT` | Opcional, **solo en local**: con `1`, el escriba devuelve preguntas de ejemplo sin llamar a Google. Se ignora en producción. **Nunca se configura en Vercel** |
 
 5. `docker compose up -d` levanta Postgres 17 en el puerto **5433** del
    equipo (el 5432 puede tenerlo un Postgres de Windows). La primera vez
    descarga la imagen. `docker compose ps` debe decir `healthy`.
-6. `npx prisma migrate deploy` crea las tablas aplicando las 15 migraciones.
+6. `npx prisma migrate deploy` crea las tablas aplicando las 16 migraciones.
 7. `npm run db:seed` crea la cuenta de prueba **`prueba@ember.test` /
-   `prueba1234`** (de desarrollo, no protege nada real) con 2 materias (5
-   preguntas en Cálculo; Historia sin preguntas), 5 jefes en varios estados,
-   almas, llama y una brasa, y con el correo ya verificado. Se puede repetir: rehace la
+   `prueba1234`** (de desarrollo, no protege nada real) con 2 materias (10
+   preguntas con tema y 25 respuestas en Cálculo, para ver los Puntos débiles;
+   Historia sin preguntas), 5 jefes en varios estados (uno ya caído, con una
+   misión de redención con prueba y 1 intento), almas, llama y una brasa, y
+   con el correo ya verificado. Se puede repetir: rehace la
    cuenta. Para comprobar el banco de preguntas:
    `node --env-file=.env --import ./scripts/alias-hooks.mjs scripts/probar-preguntas.ts`
    (tiene que terminar en "Todo bien."); el contraataque, igual con
@@ -318,7 +357,11 @@ Las preguntas genéricas de autoevaluación **no están en la base**: viven en
    cambiar `embers`); el escriba, sin gastar cuota, con
    `EMBER_FAKE_AGENT=1` delante y `scripts/probar-escriba.ts` (con
    `npm run dev` encendido, `--payload` comprueba también el HTML). Las
-   llamadas reales a Gemini (gastan cuota): `scripts/probar-gemini.ts`.
+   llamadas reales a Gemini (gastan cuota): `scripts/probar-gemini.ts`
+   (`texto`, `pdf` o `refuerzo`). La Fase 3, con `EMBER_FAKE_AGENT=1`:
+   `scripts/probar-temas.ts`, `scripts/probar-refuerzo.ts` y
+   `scripts/probar-redencion.ts` (los de temas y redención admiten
+   `--payload` con `npm run dev` encendido).
 8. `npm run dev` y abrir http://localhost:3000/login. Si con las variables de
    Gmail rellenas sale "unable to verify the first certificate", es un
    antivirus que intercepta el correo (en el portátil de Luis, Norton):
@@ -484,6 +527,22 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   opción múltiple se barajan al guardar. Lo que escribe el modelo se pinta
   **siempre como texto de React**: nada de `dangerouslySetInnerHTML` ni de
   interpretar Markdown o HTML.
+- **El refuerzo solo envía las preguntas que elige el servidor**
+  (`lib/agent/reinforce.ts`): como mucho 10 reveladas con fallos, y de cada
+  una solo tema, enunciado, respuesta correcta en texto y explicación. Ni
+  apuntes, ni ids, ni las otras opciones, ni la lista de temas. El navegador
+  solo puede pedir «refuerzo» (`EscribaRequest`). Van delimitadas con nonce,
+  como los apuntes: son datos, no instrucciones.
+- **El tema de una pregunta sellada no sale del servidor** (daría una pista):
+  la página no lo lee y las sugerencias del campo Tema solo usan reveladas. A
+  Gemini sí van, desde el servidor, para reutilizarlos.
+- **Los temas se guardan con las mayúsculas del que ya existe**
+  (`canonicalTopic`): si la materia tiene «Derivadas», «derivadas» se guarda
+  así. Un tema inválido del modelo deja la pregunta sin tema.
+- **Los Puntos débiles no hacen consultas propias:** suman por tema, en el
+  código (`weakPoints`), las estadísticas por pregunta de `questionStats()`
+  (`GROUP BY` en SQL). Umbrales en `WEAK_POINTS`: 5 respuestas en la materia,
+  3 por tema y 2 fallos para «Las que más fallas».
 - **Los apuntes son datos, no instrucciones** (inyección de prompt): van
   aparte de las reglas (`systemInstruction`), entre delimitadores con un nonce
   aleatorio, y la regla 7 pide ignorar órdenes dentro de ellos.
@@ -522,6 +581,14 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   y solo si quedan al menos 10 s de los 45 del timeout** (`GEMINI_RETRY` en
   `lib/agent/gemini.ts`). Nunca los 429, los demás 4xx ni la red caída. La
   invocación solo cuenta si al final sale bien.
+- **Modelo de reserva (`GEMINI_MODEL_FALLBACK`, opcional):** con ella, el
+  segundo intento es la reserva y no el mismo modelo, sin los 2 s de espera.
+  Solo tras un 503/`UNAVAILABLE` o si el principal agota su propio límite de
+  25 s (`GEMINI_FALLBACK`), con el mismo mínimo de 10 s restantes y como mucho
+  2 intentos en los 45 s. Un 429 y los demás 4xx **no** pasan a la reserva
+  (no gastar cuota a ciegas). El registro solo dice qué modelo respondió y los
+  códigos. Detalles en
+  [2026-10-18-modelo-de-reserva-gemini.md](sesiones/2026-10-18-modelo-de-reserva-gemini.md).
 - **La página de una materia tiene `maxDuration = 60`:** cubre los 45 s del
   timeout de Gemini más la base. En Next, el `maxDuration` de la página vale
   para todas sus Server Actions.
@@ -539,9 +606,10 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   `User.souls` solo baja al caer ante un jefe (`fallPenalty()`) o al fallar
   en un contraataque (`applySoulsDelta()`), y en los dos casos solo hasta el
   umbral del nivel actual, así que **el nivel nunca baja**. `User.level` lo
-  escriben SOLO dos sitios, los dos con `levelForSouls()` y en la misma
+  escriben SOLO tres sitios, todos con `levelForSouls()` y en la misma
   transacción que las almas: el golpe (`asestarGolpeDe`) y la respuesta al
-  contraataque (`responderPreguntaDe`), los dos en `lib/battle.ts`. La
+  contraataque (`responderPreguntaDe`), en `lib/battle.ts`, y la prueba de
+  redención aprobada (`responderPruebaDe`, `lib/redemption-trial.ts`). La
   pantalla no lo lee.
 - **`LEVEL_COSTS` es fija: no se regenera.** Se generó una vez el 8 oct
   (cómo, en la nota de esa sesión). Cambiarla movería de nivel a todo el
@@ -556,8 +624,12 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   de `serverNow`, y nunca calcula la duración (la recibe como prop). Las
   acciones reciben solo el id de la tarea.
 - **En una transacción con bloqueos, todo bloquea en el mismo orden: tarea
-  → vigilia → contraataque → usuario → misión de redención,** y cada fila se
-  bloquea antes de escribirla. La tarea, el contraataque, el usuario y la
+  → vigilia → contraataque / prueba → usuario → misión → pregunta** (todos
+  los caminos, uno por uno, en el comentario de `lib/locks.ts`). Empezar la
+  prueba de redención: usuario → misión (y crea la fila de la prueba);
+  contestarla: prueba → usuario → misión → pregunta. La revisión de jefes
+  vencidos **no toca las pruebas** (una abierta de una misión resuelta se
+  ignora). Y cada fila se bloquea antes de escribirla. La tarea, el contraataque, el usuario y la
   misión se leen con `SELECT … FOR UPDATE` (`bloquearTarea`,
   `bloquearContraataque`, `bloquearUsuario` y `bloquearMision` en
   `lib/battle.ts`). La vigilia se bloquea con su propio `UPDATE`
@@ -605,9 +677,31 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   sirve para esquivar el castigo: esa vigilia impide empezar cualquier otra
   y, terminada, ya no se puede abandonar. `comenzarVigilia` rechaza un jefe
   vencido; `asestarGolpe` no mira la fecha.
-- **La condición de la misión de redención solo vive en `REDEMPTION` y
-  `advanceRedemption()`** (`lib/game.ts`). Cambiará en la fase del agente:
-  no repartirla por el código.
+- **Las claves foráneas también bloquean.** Crear una fila que apunta a otra
+  (un `QuestionAttempt` apunta a `User` y a `Question`) toma `FOR KEY SHARE`
+  sobre esa otra, que espera a quien la tenga con `FOR UPDATE`. **Quien crea
+  una fila que apunta a otra, bloquea antes esa otra en el orden de la
+  cadena**: por eso `responderPreguntaDe` bloquea al usuario siempre que va a
+  crear un intento, y empezar la prueba bloquea al usuario aunque no lo
+  escriba. `probar-redencion` demuestra el interbloqueo del orden viejo.
+- **La condición de la misión de redención solo vive en `REDEMPTION`,
+  `redemptionRuleFor()`, `advanceRedemption()`, `trialAttemptsLeft()`,
+  `trialPassed()` y `pickForTrial()`** (`lib/game.ts`). No repartirla por el
+  código.
+- **La regla de una misión se fija al caer y no cambia** (`RedemptionMission.rule`):
+  `TRIAL` si la materia del jefe tiene 5 preguntas o más (selladas
+  incluidas), `FEW_QUESTIONS` si no, y `LEGACY` (el valor por defecto) para
+  las de antes de la Fase 3, que siguen con 2 vigilias. Así el código viejo,
+  durante un despliegue, sigue creando misiones con su regla.
+- **El intento de la prueba se gasta al empezarla.** Recargar retoma la
+  abierta; dos pestañas obtienen la misma.
+- **La prueba de redención es práctica real sin recompensa:** escribe
+  `QuestionAttempt` (0 almas, sin vigilia), el repaso y quita el sello, pero
+  no da ni quita almas ni brasas, ni toca la llama. Solo al aprobar devuelve
+  las almas de la misión.
+- **El texto de un plazo (`formatDeadline`) lo escribe siempre el servidor:**
+  el ICU del navegador podría escribir «p. m.» distinto y descuadrar la
+  hidratación.
 - **Los avisos de la redención salen 24 h deducidos de fechas**
   (`resolvedAt` de la misión, `Task.failedAt`), sin escribir nada al leer.
 - **La llama se deduce al leer y solo se escribe al golpear.** `flame` y
@@ -722,7 +816,8 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 - **Lo que dice la landing tiene que ser cierto hoy.** Nada de "para
   siempre" ni "∞"; "Próximamente" solo para lo que no existe. Los números
   salen de `lib/game.ts` y `lib/agent/rules.ts` (en las maquetas, importando
-  las constantes): si cambian allí, revisar `app/page.tsx`.
+  las constantes; la redención, de `REDEMPTION`): si cambian allí, revisar
+  `app/page.tsx`.
 - **Nada empieza oculto en el HTML del servidor.** Las apariciones al hacer
   scroll (`Reveal`) solo ocultan lo que el script ve fuera de la pantalla;
   sin JavaScript o con movimiento reducido, todo se ve completo. El estado
@@ -742,6 +837,10 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   (`animationPlayState`): una clase pierde ante el atajo.
 - **Un botón con el foco no pasa a `disabled` mientras espera una
   respuesta,** porque perdería el foco: `aria-disabled` y se ignora el clic.
+- **Una prueba que mide el azar crea sus propios datos**, no depende del
+  seed: el seed puede cambiar (pasó con el sorteo de `probar-preguntas`).
+- **Los scripts de la Fase 3 comparten `scripts/probar-comun.ts`**
+  (`check`, inicio de sesión temporal y petición de HTML o payload RSC).
 - **Antes de automatizar con Chrome, comprobar que el navegador es el de
   este equipo:** abrir `localhost:3000/login?marca=<texto único>` y buscar la
   marca en el log de `npm run dev`. Si no llega, ese Chrome es el del otro
@@ -754,7 +853,10 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
   anima). Si una pestaña no deja hacer capturas, abrir otra nueva. Si
   `resize_window` no cambia el ancho, probar 320 px metiendo la página en un
   `<iframe>` de 320 px (dentro, el viewport y las consultas de contenedor
-  ven 320).
+  ven 320). Si las capturas caducan con la pestaña visible, medir
+  `requestAnimationFrame` en esa página y en otra: si todas van a 1–5
+  imágenes por segundo es Chrome frenando la ventana, no la página; seguir
+  comprobando por el DOM.
 - **Los estilos base de `globals.css` solo tocan elementos sin clases**
   (`:not([class])`). Así las pantallas sin diseño se leen y las diseñadas no
   heredan nada inesperado.
@@ -774,6 +876,21 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 
 ## Pendientes
 
+- [ ] **Elegir y probar un modelo de reserva real** (`GEMINI_MODEL_FALLBACK`):
+  solo se probó con el `fetch` falso.
+- [ ] **Repetir la llamada real a Gemini del refuerzo:**
+  `node --env-file=.env --import ./scripts/alias-hooks.mjs scripts/probar-gemini.ts refuerzo`
+  (y `texto`). El 18 oct Gemini respondía 503 o no respondía, también al
+  camino de siempre.
+- [ ] Desplegar `20261018235832_fase3` (solo aditiva) y probar en producción
+  la prueba de redención, el refuerzo y los Puntos débiles. Las misiones
+  activas en ese momento seguirán con 2 vigilias (`LEGACY`).
+- [ ] Un *Instant Rollback* después de desplegar dejaría misiones `TRIAL` en
+  manos del código viejo, que las cumpliría con 2 vigilias (solo más fácil).
+- [ ] Las pruebas abiertas de una misión que venció o se perdió se quedan con
+  `finishedAt` nulo (se ignoran). Cerrarlas si molestan en el historial.
+- [ ] Prueba de redención, refuerzo y Puntos débiles: lector de pantalla real,
+  Safari y Firefox, y «Afrontar la prueba» sin JavaScript.
 - [ ] Regenerar el video y el póster del hero con "Asestar golpe" (hoy el
   botón del video dice "ATACAR").
 - [ ] Landing: decidir si se ensanchan el bloque del bestiario y el reloj a
@@ -1029,4 +1146,6 @@ datos), `docker compose up -d`, `npx prisma migrate deploy` y
 | 2026-10-14 | Fase 2 · paso 5: la brasa (cierra la Fase 2): `User.embers` con `CHECK`, `Counterattack.bossDifficulty`, evaluación perezosa compartida con `flameOutlook()`, llama protegida, chip, píldora y avisos, `input: false` probado contra el servidor | [2026-10-14-la-brasa.md](sesiones/2026-10-14-la-brasa.md) |
 | 2026-10-14 | Pulido antes de la Fase 3: «olvidé mi contraseña» (token de un solo uso, sin enumeración, sesiones cerradas, secuestro previo cerrado), `PasswordField` y cuatro errores visuales (gris, mazmorra vacía, fecha a 320 px, golpe tardío) | [2026-10-14-pulido-antes-de-fase-3.md](sesiones/2026-10-14-pulido-antes-de-fase-3.md) |
 | 2026-10-12 | Fase 2 · paso 4: las preguntas que vuelven (repetición espaciada tipo Leitner, días de calendario de Bogotá, migración con relleno en SQL comprobado contra `nextReview`, reserva para nuevas, `FOR UPDATE` del nivel, «Repaso» y estados del banco) | [2026-10-12-preguntas-que-vuelven.md](sesiones/2026-10-12-preguntas-que-vuelven.md) |
+| 2026-10-18 | Fase 3 completa: temas y puntos débiles (`Question.topic`, `GROUP BY` y `groupBy`, umbrales), refuerzo dirigido desde las falladas sin guardar apuntes, prueba de redención (`RedemptionTrial`, `RedemptionMission.rule` con `LEGACY` por compatibilidad, un intento por vigilia, 4 de 5), `lib/locks.ts` y el interbloqueo por la clave foránea | [2026-10-18-fase-3-el-agente.md](sesiones/2026-10-18-fase-3-el-agente.md) |
+| 2026-10-18 | Modelo de reserva para Gemini (`GEMINI_MODEL_FALLBACK`): 503 o timeout del primer intento (25 s) → segundo modelo dentro de los 45 s; 429 y 4xx no; `AbortController` por intento; 20 comprobaciones nuevas con `fetch` falso | [2026-10-18-modelo-de-reserva-gemini.md](sesiones/2026-10-18-modelo-de-reserva-gemini.md) |
 | 2026-10-17 | Landing de la Fase 2: textos auditados ("Estudia. Golpea. Conquista."), cabecera fija, jefes y brasas en el hero, islas `Reveal` (IntersectionObserver) y `VigilClock`, bestiario, sección El escriba, máscaras de degradado, rejilla de dos columnas, "Pausar animaciones" (`@custom-variant`, `localStorage`), `scripts/capturas-landing.mjs` (CDP) | [2026-10-17-landing-fase-2.md](sesiones/2026-10-17-landing-fase-2.md) |

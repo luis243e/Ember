@@ -96,3 +96,28 @@ const shortDueDateFormatter = new Intl.DateTimeFormat("es-CO", {
 export function formatDueDateShort(date: Date): string {
   return shortDueDateFormatter.format(date);
 }
+
+// "lunes 20 de octubre a las 3:15 p. m.": un INSTANTE (el plazo de la misión
+// de redención) en hora de Colombia, la de la app. Sin artículo: quien lo usa
+// escribe "antes del…" o "hasta el…". Se arma con las partes del formateador
+// para no depender de las comas que pone cada versión de Node. Solo en el
+// servidor: el navegador recibe el texto ya hecho (su ICU podría escribir
+// "p. m." distinto y no coincidir al hidratar).
+const deadlineFormatter = new Intl.DateTimeFormat("es-CO", {
+  timeZone: APP_TIME_ZONE,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
+
+export function formatDeadline(date: Date | number): string {
+  const parts = Object.fromEntries(
+    deadlineFormatter.formatToParts(date).map((part) => [part.type, part.value]),
+  ) as Record<string, string>;
+  // "a la 1:05" en singular; "a las 3:15" en plural.
+  const article = parts.hour === "1" ? "a la" : "a las";
+  return `${parts.weekday} ${parts.day} de ${parts.month} ${article} ${parts.hour}:${parts.minute} ${parts.dayPeriod}`;
+}

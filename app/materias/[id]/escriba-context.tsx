@@ -10,15 +10,18 @@ import { formatNumber } from "@/lib/text";
 type EscribaContextValue = {
   // Preguntas que escribió la última invocación de esta visita, o null.
   // written cambia de objeto en cada invocación, para que el aviso vuelva a
-  // recibir el foco aunque el número sea el mismo.
-  written: { count: number } | null;
-  setWritten: (written: { count: number } | null) => void;
+  // recibir el foco aunque el número sea el mismo. reinforce: las escribió
+  // el refuerzo (desde las falladas), no los apuntes.
+  written: Written | null;
+  setWritten: (written: Written | null) => void;
 };
+
+type Written = { count: number; reinforce?: boolean };
 
 const EscribaContext = createContext<EscribaContextValue | null>(null);
 
 export function EscribaProvider({ children }: { children: ReactNode }) {
-  const [written, setWritten] = useState<{ count: number } | null>(null);
+  const [written, setWritten] = useState<Written | null>(null);
   return <EscribaContext value={{ written, setWritten }}>{children}</EscribaContext>;
 }
 
@@ -53,7 +56,9 @@ export function AvisoEscriba() {
     >
       <p className="text-sm font-semibold text-gold-bright">El escriba ha escrito {preguntas}.</p>
       <p className="text-[13px] text-ash">
-        Las ha sacado de tus apuntes de hoy. Te esperan en los próximos contraataques.
+        {written.reinforce
+          ? "Las ha escrito sobre los conceptos que más fallas. Te esperan en los próximos contraataques."
+          : "Las ha sacado de tus apuntes de hoy. Te esperan en los próximos contraataques."}
       </p>
     </div>
   );

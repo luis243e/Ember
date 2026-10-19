@@ -1,6 +1,5 @@
 "use client";
 
-import { Check, X } from "lucide-react";
 import { useEffect, useRef, useState, useTransition, type KeyboardEvent, type RefObject } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { COUNTERATTACK, EMBER, type CounterattackKind } from "@/lib/game";
 import type { PublicQuestion } from "@/lib/questions/types";
 import { formatNumber } from "@/lib/text";
+import { FOCUS_RING, LETTERS, QuestionView, RevealedView } from "@/app/mazmorra/quiz-views";
 import { responderPregunta, retirarPregunta, type ResultadoRespuesta } from "./actions";
 
 // La pregunta que toca, tal como llega del servidor (page.tsx). number empieza
@@ -34,12 +34,6 @@ type CounterattackPanelProps = {
   // inerte y devolver el foco al cerrarlo).
   onOpenChange: (open: boolean) => void;
 };
-
-const LETTERS = ["A", "B", "C", "D"];
-
-// El mismo contorno de foco que los botones (buttonStyles).
-const FOCUS_RING =
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright";
 
 // Panel del contraataque (Figma: "FASE 2 · contraataque", pregunta,
 // respuesta correcta y resumen). Es un diálogo modal sobre la escena: la
@@ -193,19 +187,40 @@ export function CounterattackPanel({
                   <RevealedView
                     question={revealed.snapshot.question}
                     chosen={revealed.chosen}
-                    result={revealed.result}
-                    explanationRef={explanationRef}
-                    onNext={next}
-                    retire={
-                      // Solo en las del escriba que se acaban de contestar
-                      // (las saltadas ya no existen).
-                      revealed.snapshot.question?.fromAgent && revealed.result.outcome !== "skipped"
-                        ? { counterattackId: revealed.snapshot.id, questionNumber: revealed.snapshot.number }
-                        : null
+                    outcome={revealed.result.outcome}
+                    correctIndex={revealed.result.correctIndex}
+                    explanation={revealed.result.explanation}
+                    verdict={VERDICTS[revealed.result.outcome]}
+                    optionNote={soulsLabel(revealed.result.soulsDelta, revealed.result.protectedByLevel)}
+                    dodgeNote={
+                      revealed.result.outcome === "skipped"
+                        ? "No cuenta: 0 almas."
+                        : `${soulsLabel(revealed.result.soulsDelta, revealed.result.protectedByLevel)}. Esquivar ni da ni quita.`
                     }
+                    newLevel={revealed.result.newLevel}
+                    explanationRef={explanationRef}
+                    // Retírala: solo en las del escriba que se acaban de
+                    // contestar (las saltadas ya no existen). key: se reinicia
+                    // con cada pregunta.
+                    footerStart={
+                      revealed.snapshot.question?.fromAgent && revealed.result.outcome !== "skipped" ? (
+                        <RetirarPregunta
+                          key={revealed.snapshot.number}
+                          counterattackId={revealed.snapshot.id}
+                          questionNumber={revealed.snapshot.number}
+                        />
+                      ) : null
+                    }
+                    nextLabel={revealed.result.summary ? "Ver resumen" : "Siguiente"}
+                    onNext={next}
                   />
                 ) : current.question ? (
-                  <QuestionView question={current.question} pending={pending} onAnswer={answer} />
+                  <QuestionView
+                    question={current.question}
+                    pending={pending}
+                    onAnswer={answer}
+                    stakes={stakesLine(current.question.kind)}
+                  />
                 ) : (
                   // Se borró del banco a mitad del contraataque: al seguir,
                   // la acción la salta sin almas.
@@ -239,187 +254,11 @@ export function CounterattackPanel({
   );
 }
 
-// ---------------------------------------------------------------------------
-//  La pregunta (105:2)
-// ---------------------------------------------------------------------------
-
-function QuestionView({
-  question,
-  pending,
-  onAnswer,
-}: {
-  question: PublicQuestion;
-  pending: boolean;
-  onAnswer: (chosen: number | null) => void;
-}) {
-  return (
-    <>
-      <ul className="flex flex-col gap-2.5">
-        {question.options.map((option, i) => (
-          <li key={i}>
-            {/* aria-disabled y no disabled mientras espera: un botón con el
-                foco que pasa a disabled lo pierde (se va a <body>). */}
-            <button
-              type="button"
-              onClick={() => onAnswer(i)}
-              aria-disabled={pending || undefined}
-              aria-keyshortcuts={String(i + 1)}
-              className={cn(
-                "flex min-h-14 w-full cursor-pointer items-center gap-3.5 rounded-lg border border-line bg-surface px-4 py-3 text-left transition-colors hover:border-gold aria-disabled:cursor-wait",
-                FOCUS_RING,
-              )}
-            >
-              <Letter index={i} />
-              <span className="min-w-0 flex-1 text-base leading-snug wrap-anywhere text-parchment">
-                {option}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pt-1">
-        <button
-          type="button"
-          onClick={() => onAnswer(null)}
-          aria-disabled={pending || undefined}
-          className={cn(
-            "-mx-2 flex h-11 cursor-pointer items-center rounded-md px-2 text-sm leading-[normal] font-semibold text-ash transition-colors hover:text-parchment aria-disabled:cursor-wait",
-            FOCUS_RING,
-          )}
-        >
-          Esquivar
-        </button>
-        <p className="text-xs leading-[normal] text-smoke">{stakesLine(question.kind)}</p>
-      </div>
-    </>
-  );
-}
-
 // "Acertar +15 almas · Fallar −5", sacado de COUNTERATTACK (lib/game.ts).
 function stakesLine(kind: CounterattackKind): string {
   const { correct, wrong } = COUNTERATTACK.souls[kind];
   if (kind === "GENERIC") return `Contesta con sinceridad · +${correct} almas`;
   return `Acertar +${correct} almas · Fallar −${Math.abs(wrong)}`;
-}
-
-// ---------------------------------------------------------------------------
-//  La respuesta (105:77 y su variante de fallo)
-// ---------------------------------------------------------------------------
-
-function RevealedView({
-  question,
-  chosen,
-  result,
-  explanationRef,
-  onNext,
-  retire,
-}: {
-  question: PublicQuestion | null;
-  chosen: number | null;
-  result: Answered;
-  explanationRef: RefObject<HTMLDivElement | null>;
-  onNext: () => void;
-  // La pregunta se puede retirar (es del escriba): con qué se pide.
-  retire: { counterattackId: string; questionNumber: number } | null;
-}) {
-  const verdict = VERDICTS[result.outcome];
-  // Las almas que se enseñan junto a la opción elegida, o en la explicación
-  // si no se eligió ninguna (esquivar, pregunta saltada).
-  const soulsText = soulsLabel(result.soulsDelta, result.protectedByLevel);
-
-  return (
-    <>
-      {question && (
-        <ul className="flex flex-col gap-2.5">
-          {question.options.map((option, i) => {
-            const isCorrect = result.correctIndex === i;
-            const isChosen = chosen === i;
-            // En las genéricas no hay correcta: se marca en dorado la elegida.
-            const good = isCorrect || (result.outcome === "answered" && isChosen);
-            const bad = isChosen && result.outcome === "wrong";
-            return (
-              <li
-                key={i}
-                className={cn(
-                  "flex min-h-14 items-center gap-3.5 rounded-lg border px-4 py-3",
-                  good
-                    ? "border-[1.5px] border-gold-bright bg-gold/14"
-                    : bad
-                      ? "border-[1.5px] border-blood bg-blood/12"
-                      : "border-line bg-surface opacity-45",
-                )}
-              >
-                <Letter index={i} bright={good} />
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 text-base leading-snug wrap-anywhere text-parchment",
-                    (good || bad) && "font-semibold",
-                  )}
-                >
-                  {option}
-                  {/* Para el lector de pantalla, lo que dicen los colores. */}
-                  {isCorrect && <span className="sr-only"> (respuesta correcta)</span>}
-                  {isChosen && <span className="sr-only"> (tu respuesta)</span>}
-                </span>
-                {good && (
-                  <span className="flex shrink-0 items-center gap-1.5 text-sm leading-[normal] font-semibold text-gold-bright">
-                    <Check aria-hidden size={14} />
-                    {isChosen && soulsText}
-                  </span>
-                )}
-                {bad && (
-                  <span className="flex shrink-0 items-center gap-1.5 text-right text-sm leading-[normal] font-semibold text-parchment">
-                    <X aria-hidden size={14} />
-                    {soulsText}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {/* La explicación: recibe el foco al contestar. */}
-      <div
-        ref={explanationRef}
-        tabIndex={-1}
-        className={cn(
-          "flex flex-col gap-1.5 rounded-lg border border-line bg-surface px-4 py-3.5 leading-[normal]",
-          FOCUS_RING,
-        )}
-      >
-        <p className={cn("font-display text-[17px] font-bold", verdict.className)}>{verdict.title}</p>
-        {chosen === null && (
-          <p className="text-sm font-semibold text-parchment">
-            {result.outcome === "skipped" ? "No cuenta: 0 almas." : `${soulsText}. Esquivar ni da ni quita.`}
-          </p>
-        )}
-        {result.explanation && (
-          <p className="text-sm leading-normal wrap-anywhere text-ash">{result.explanation}</p>
-        )}
-        {result.newLevel && (
-          <p className="pt-1 font-display text-sm font-bold tracking-[3px] text-ember uppercase">
-            Has alcanzado el nivel {result.newLevel}
-          </p>
-        )}
-      </div>
-
-      {/* Pie: "Retírala" a la izquierda (solo del escriba) y SIGUIENTE a la
-          derecha. En móvil, uno encima del otro. key: se reinicia con cada
-          pregunta. */}
-      <div className="flex flex-col gap-3 @md:flex-row @md:items-end @md:justify-between">
-        {retire ? <RetirarPregunta key={retire.questionNumber} {...retire} /> : <span aria-hidden />}
-        <button
-          type="button"
-          onClick={onNext}
-          className={cn(buttonStyles({ size: "md" }), "w-full shrink-0 cursor-pointer @md:w-auto")}
-        >
-          {result.summary ? "Ver resumen" : "Siguiente"}
-        </button>
-      </div>
-    </>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -640,20 +479,6 @@ function EmberResult({ ember }: { ember: NonNullable<Summary["ember"]> }) {
 // ---------------------------------------------------------------------------
 //  Piezas
 // ---------------------------------------------------------------------------
-
-function Letter({ index, bright = false }: { index: number; bright?: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "flex size-7 shrink-0 items-center justify-center rounded-full border font-display text-[13px] leading-none font-bold",
-        bright ? "border-gold-bright text-gold-bright" : "border-gold text-gold",
-      )}
-    >
-      {LETTERS[index]}
-    </span>
-  );
-}
 
 // "+15 almas", "−5 almas", "0 almas" o, si el nivel absorbió la pérdida,
 // "0 almas · tu nivel te protege" (o "−3 almas · …" si solo una parte).

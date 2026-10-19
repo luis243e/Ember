@@ -16,14 +16,26 @@ type Props = {
   // Invocaciones que le quedan hoy. La calcula el servidor; después de una
   // invocación con éxito la página se vuelve a pintar con la nueva.
   remaining: number;
+  // Preguntas reveladas con fallos de la materia (reinforcementCandidates):
+  // con menos de AGENT.reinforce.minFailed, el refuerzo está deshabilitado.
+  // Solo el número: qué preguntas se mandan lo decide el servidor al invocar.
+  failedQuestions: number;
 };
 
-type Mode = "TEXT" | "PDF";
+type Mode = "TEXT" | "PDF" | "REINFORCE";
 
 const MODES: { value: Mode; label: string }[] = [
   { value: "TEXT", label: "Pegar texto" },
   { value: "PDF", label: "Subir PDF" },
+  { value: "REINFORCE", label: "Reforzar puntos débiles" },
 ];
+
+// El aviso de "Antes de invocar": adónde va lo que se envía.
+const PRIVACY: Record<Mode, string> = {
+  TEXT: "Tus apuntes se envían a Google Gemini para escribir las preguntas. Ember no los guarda. No pegues datos personales.",
+  PDF: "Tus apuntes se envían a Google Gemini para escribir las preguntas. Ember no los guarda. No pegues datos personales.",
+  REINFORCE: "Se envían a Google Gemini tus preguntas falladas, no tus apuntes.",
+};
 
 const FOCUS_RING =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-bright";
@@ -34,7 +46,7 @@ const FOCUS_RING =
 // arma la FormData a mano y llama a la acción dentro de una transición. Así
 // React no vacía el formulario al terminar y, si hay error, los apuntes y el
 // PDF siguen aquí. Con éxito se vacían.
-export function EscribaForm({ subjectId, remaining }: Props) {
+export function EscribaForm({ subjectId, remaining, failedQuestions }: Props) {
   const { setWritten } = useEscriba();
   const [mode, setMode] = useState<Mode>("TEXT");
   const [notes, setNotes] = useState("");
@@ -48,6 +60,9 @@ export function EscribaForm({ subjectId, remaining }: Props) {
   // Contados como los cuenta el servidor (los saltos de línea, uno).
   const chars = normalizarApuntes(notes).length;
   const exhausted = remaining <= 0 || error?.limit === true;
+  // Reforzar sin bastantes preguntas falladas: el botón no se puede pulsar.
+  const cannotReinforce = mode === "REINFORCE" && failedQuestions < AGENT.reinforce.minFailed;
+  const sent = Math.min(failedQuestions, AGENT.reinforce.maxSent);
 
   // Un PDF elegido o soltado. Se comprueba aquí lo que se puede (tamaño y
   // tipo) para no subir 4 MB para nada; lo que cuenta es lo que diga el
@@ -75,7 +90,7 @@ export function EscribaForm({ subjectId, remaining }: Props) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     // Ya hay una invocación en camino, o no quedan: un segundo clic no hace nada.
-    if (pending || exhausted) return;
+    if (pending || exhausted || cannotReinforce) return;
 
     if (mode === "TEXT" && normalizarApuntes(notes).trim() === "") {
       setError({ message: AGENT_ERRORS.emptyText, limit: false });
@@ -108,7 +123,7 @@ export function EscribaForm({ subjectId, remaining }: Props) {
       }
       setNotes("");
       setFile(null);
-      setWritten({ count: result.created });
+      setWritten({ count: result.created, reinforce: mode === "REINFORCE" });
     });
   }
 
@@ -125,13 +140,20 @@ export function EscribaForm({ subjectId, remaining }: Props) {
       <form onSubmit={handleSubmit} className="flex flex-col gap-4.5" aria-busy={pending || undefined}>
         {/* Modo: dos radios con aspecto de pestañas, como el tipo de pregunta
             del formulario manual. */}
-        <fieldset className="min-w-0" disabled={pending}>
-          <legend className="sr-only">Cómo le das tus apuntes al escriba</legend>
-          <div className="grid grid-cols-2 overflow-hidden rounded-md border border-line">
+        {/* @container: tres pestañas en una fila si caben; si no (a 320
+            px), las dos primeras arriba y "Reforzar puntos débiles" debajo,
+            a lo ancho. */}
+        <fieldset className="@container min-w-0" disabled={pending}>
+          <legend className="sr-only">Qué le das al escriba</legend>
+          <div className="grid grid-cols-2 overflow-hidden rounded-md border border-line @min-[21rem]:grid-cols-3">
             {MODES.map(({ value, label }) => (
               <label
                 key={value}
-                className="relative flex min-h-11 items-center justify-center px-2 py-2.5 text-center text-sm leading-tight text-ash transition-colors has-checked:bg-gold/16 has-checked:font-semibold has-checked:text-gold-bright"
+                className={cn(
+                  "relative flex min-h-11 items-center justify-center px-2 py-2.5 text-center text-sm leading-tight text-ash transition-colors has-checked:bg-gold/16 has-checked:font-semibold has-checked:text-gold-bright",
+                  value === "REINFORCE" &&
+                    "col-span-2 border-t border-line @min-[21rem]:col-span-1 @min-[21rem]:border-t-0",
+                )}
               >
                 <input
                   type="radio"
@@ -150,7 +172,25 @@ export function EscribaForm({ subjectId, remaining }: Props) {
           </div>
         </fieldset>
 
-        {mode === "TEXT" ? (
+        {mode === "REINFORCE" ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-line bg-night px-3.5 py-3 leading-[normal]">
+            <p className="text-sm leading-[1.45] text-parchment">
+              El escriba toma hasta {AGENT.reinforce.maxSent} preguntas que has fallado en esta
+              materia y escribe entre {AGENT.reinforce.minQuestions} y {AGENT.reinforce.maxQuestions}{" "}
+              nuevas sobre los mismos conceptos. Llegan selladas, como las demás.
+            </p>
+            {/* aria-describedby del botón: el lector oye por qué no se
+                puede pulsar. */}
+            <p
+              id="refuerzo-estado"
+              className={cn("text-[13px] leading-[1.45]", cannotReinforce ? "text-ember" : "text-ash")}
+            >
+              {cannotReinforce
+                ? `Necesitas al menos ${AGENT.reinforce.minFailed} preguntas reveladas con fallos en esta materia (ahora ${failedQuestions === 1 ? "tienes 1" : `tienes ${formatNumber(failedQuestions)}`}). Contesta algunos contraataques y vuelve.`
+                : `Se ${sent === 1 ? "enviará 1 pregunta fallada" : `enviarán ${formatNumber(sent)} preguntas falladas`}: las que más fallas.`}
+            </p>
+          </div>
+        ) : mode === "TEXT" ? (
           <div className="flex flex-col gap-2">
             <label htmlFor="apuntes" className={labelStyles}>
               Tus apuntes
@@ -246,10 +286,7 @@ export function EscribaForm({ subjectId, remaining }: Props) {
             apuntes. */}
         <div className="flex flex-col gap-1 rounded-lg border border-ember/45 bg-ember/8 px-3.5 py-3 leading-[normal]">
           <p className="text-[11px] font-semibold tracking-[1px] text-ember uppercase">Antes de invocar</p>
-          <p className="text-[13px] text-parchment">
-            Tus apuntes se envían a Google Gemini para escribir las preguntas. Ember no los guarda. No
-            pegues datos personales.
-          </p>
+          <p className="text-[13px] text-parchment">{PRIVACY[mode]}</p>
         </div>
 
         {exhausted ? (
@@ -276,7 +313,8 @@ export function EscribaForm({ subjectId, remaining }: Props) {
               que pasa a disabled lo pierde. Sin invocaciones, sí disabled. */}
           <button
             type="submit"
-            disabled={exhausted}
+            disabled={exhausted || cannotReinforce}
+            aria-describedby={cannotReinforce ? "refuerzo-estado" : undefined}
             aria-disabled={pending || undefined}
             aria-busy={pending || undefined}
             className={cn(

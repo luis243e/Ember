@@ -5,7 +5,7 @@
 // No hay tareas programadas: la revisión se hace al cargar las páginas
 // privadas (loadRedemption). Es idempotente: ejecutarla dos veces, o en dos
 // pestañas a la vez, aplica el castigo una sola vez.
-import type { RedemptionStatus } from "@prisma/client";
+import type { RedemptionRule, RedemptionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { todayDateInAppTimeZone } from "@/lib/dates";
 import {
@@ -14,6 +14,8 @@ import {
   REDEMPTION_NOTICE_HOURS,
   redemptionDeadline,
   redemptionHoursLeft,
+  redemptionRuleFor,
+  trialAttemptsLeft,
 } from "@/lib/game";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -24,8 +26,16 @@ export type ActiveRedemption = {
   bossName: string;
   otherBosses: number;
   soulsAtStake: number;
+  // Cómo se cumple (lib/game.ts, REDEMPTION). En TRIAL, la tarjeta enseña los
+  // intentos; en las otras dos, las vigilias.
+  rule: RedemptionRule;
   vigilsDone: number;
   vigilsRequired: number;
+  // Intentos de la prueba que quedan (0 si no es TRIAL).
+  attemptsLeft: number;
+  // Hasta cuándo, como milisegundos: la tarjeta lo escribe en hora de
+  // Colombia.
+  deadline: number;
   // Calculado aquí, con la hora del servidor.
   hoursLeft: number;
 };
@@ -72,8 +82,8 @@ async function failOverdueBosses(userId: string, now: Date): Promise<void> {
       // Si otra revisión las está marcando, esta espera; al seguir, Postgres
       // vuelve a comprobar el WHERE con la fila nueva y las que ya son FAILED
       // no salen. Así el castigo se cobra una sola vez.
-      const overdue = await tx.$queryRaw<{ id: string; name: string; dueDate: Date }[]>`
-        SELECT t."id", t."name", t."dueDate" FROM "Task" t
+      const overdue = await tx.$queryRaw<{ id: string; name: string; dueDate: Date; subjectId: string }[]>`
+        SELECT t."id", t."name", t."dueDate", t."subjectId" FROM "Task" t
         JOIN "Subject" s ON s."id" = t."subjectId"
         WHERE s."userId" = ${userId} AND t."status" = 'ALIVE' AND t."dueDate" < ${today}
         ORDER BY t."id"
@@ -131,12 +141,18 @@ async function failOverdueBosses(userId: string, now: Date): Promise<void> {
       if (falling.length > 0) {
         const { lost, soulsAfter } = fallPenalty(owner.souls);
         if (lost > 0) {
+          // La regla se fija AHORA y no cambia: prueba de redención si la
+          // materia del jefe que la provoca tiene preguntas bastantes (las
+          // selladas cuentan), 2 vigilias si no. Contarlas solo lee: no
+          // bloquea nada.
+          const bankSize = await tx.question.count({ where: { subjectId: falling[0].subjectId } });
           await tx.user.update({ where: { id: userId }, data: { souls: soulsAfter } });
           await tx.redemptionMission.create({
             data: {
               userId,
               taskId: falling[0].id,
               soulsAtStake: lost,
+              rule: redemptionRuleFor(bankSize),
               // El mismo instante que Task.failedAt: así se sabe qué jefes
               // cayeron con ella.
               fellAt: now,
@@ -201,7 +217,9 @@ async function readRedemption(userId: string, now: Date) {
       select: {
         status: true,
         soulsAtStake: true,
+        rule: true,
         vigilsDone: true,
+        trialsUsed: true,
         fellAt: true,
         deadline: true,
         resolvedAt: true,
@@ -282,8 +300,11 @@ function activeMissionOf(missions: Missions, fallen: Fallen, now: Date): ActiveR
     // que la provocó.
     otherBosses: Math.max(0, fallen.filter((t) => sameInstant(t.failedAt, active.fellAt)).length - 1),
     soulsAtStake: active.soulsAtStake,
+    rule: active.rule,
     vigilsDone: active.vigilsDone,
     vigilsRequired: REDEMPTION.vigilsRequired,
+    attemptsLeft: trialAttemptsLeft(active),
+    deadline: active.deadline.getTime(),
     hoursLeft: redemptionHoursLeft(active.deadline, now),
   };
 }

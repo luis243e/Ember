@@ -20,6 +20,12 @@ export const AGENT = {
   pendingExpiryMinutes: 5,
   // Lo que se espera a Gemini antes de rendirse.
   timeoutMs: 45_000,
+  // Temas de la materia que se le pasan para que los reutilice: los más usados.
+  maxTopicsSent: 30,
+  // Reforzar puntos débiles: se le mandan como mucho maxSent preguntas
+  // reveladas con fallos (hacen falta al menos minFailed) y escribe entre
+  // minQuestions y maxQuestions nuevas. Cuenta para el mismo límite diario.
+  reinforce: { maxSent: 10, minFailed: 3, minQuestions: 3, maxQuestions: 8 },
 } as const;
 
 // Los <textarea> envían los saltos de línea como "\r\n", pero el navegador
@@ -59,4 +65,5 @@ export const AGENT_ERRORS = {
   badResponse:
     "El escriba no ha podido terminar de escribir. Inténtalo de nuevo: esta invocación no cuenta.",
   unavailable: "El escriba no está disponible ahora mismo. Esta invocación no cuenta.",
+  notEnoughFailed: `Necesitas al menos ${AGENT.reinforce.minFailed} preguntas reveladas con fallos en esta materia para reforzar tus puntos débiles. Esta invocación no cuenta.`,
 } as const;

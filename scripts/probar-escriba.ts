@@ -12,6 +12,8 @@
 //   3. el límite de 3 (las fallidas no cuentan), la concurrencia, la PENDING
 //      caducada, el máximo de 200 y las repetidas del banco;
 //   3b. el reintento único de Gemini ante un 503 (con un fetch falso);
+//   3c. el modelo de reserva (GEMINI_MODEL_FALLBACK): 503 o timeout del
+//       principal → reserva; 429 y 4xx no; plazo único de 45 s;
 //   4. que una sellada no se edita, que contestarla o esquivarla la revela y
 //      que solo se puede retirar lo permitido;
 //   5. el contraataque según la dificultad;
@@ -354,7 +356,8 @@ async function probarLimite(userId: string, otherId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 // Respuestas falsas de Google, en orden. "red" = el fetch lanza (sin conexión).
-type Falsa = { status: number; body?: unknown } | "red";
+// "cuelga" = el fetch no contesta hasta que se aborta la señal (timeout).
+type Falsa = { status: number; body?: unknown } | "red" | "cuelga";
 const exito = {
   status: 200,
   body: {
@@ -369,17 +372,34 @@ const no503 = { status: 503, body: { error: { code: 503, status: "UNAVAILABLE" }
 // Un generador de verdad (crearGenerador) con un fetch falso que devuelve las
 // respuestas en orden, una espera que no espera (apunta cuánto) y un reloj
 // que se puede adelantar. Nada sale a la red.
-function generadorFalso(respuestas: Falsa[], relojAlComprobar?: number) {
-  const registro = { llamadas: 0, esperas: [] as number[] };
+// `fallbackModel` va siempre ("" = sin reserva) para que el entorno de quien
+// ejecuta las pruebas no cambie el resultado.
+function generadorFalso(
+  respuestas: Falsa[],
+  relojAlComprobar?: number,
+  opciones: { fallbackModel?: string; firstAttemptMs?: number } = {},
+) {
+  const registro = { llamadas: 0, esperas: [] as number[], modelos: [] as string[], claveEnLaUrl: false };
   let lecturasDelReloj = 0;
   const generar = crearGenerador({
     apiKey: "clave-de-prueba",
     model: "modelo-de-prueba",
-    fetch: (async () => {
+    fallbackModel: opciones.fallbackModel ?? "",
+    firstAttemptMs: opciones.firstAttemptMs,
+    fetch: (async (url: string, init?: RequestInit) => {
+      registro.modelos.push(decodeURIComponent(url.split("/models/")[1].split(":")[0]));
+      if (url.includes("clave-de-prueba")) registro.claveEnLaUrl = true;
       const r = respuestas[registro.llamadas++];
+      if (r === "cuelga") {
+        return new Promise<Response>((_, reject) => {
+          const abortar = () => reject(new DOMException("aborted", "AbortError"));
+          if (init?.signal?.aborted) abortar();
+          else init?.signal?.addEventListener("abort", abortar);
+        });
+      }
       if (!r || r === "red") throw new TypeError("fetch failed");
       return new Response(JSON.stringify(r.body ?? {}), { status: r.status });
-    }) as typeof fetch,
+    }) as unknown as typeof fetch,
     sleep: async (ms) => {
       registro.esperas.push(ms);
     },
@@ -442,6 +462,96 @@ async function probarReintento(userId: string): Promise<void> {
   const i = generadorFalso([no503, exito], 33_000);
   const rI = await i.generar(TEXT_INPUT);
   check("503 a los 33 s (quedarían 10 s justos) → sí se reintenta", rI.ok && i.registro.llamadas === 2, i.registro);
+}
+
+// ---------------------------------------------------------------------------
+//  3c. El modelo de reserva
+// ---------------------------------------------------------------------------
+
+async function probarReserva(): Promise<void> {
+  console.log("\n3c. Modelo de reserva de Gemini (GEMINI_MODEL_FALLBACK)");
+  const reserva = { fallbackModel: "modelo-de-reserva" };
+  const limite429 = { status: 429, body: { error: { status: "RESOURCE_EXHAUSTED" } } };
+
+  // Principal 503 → reserva OK, sin esperar, y la clave nunca va en la URL.
+  const a = generadorFalso([no503, exito], undefined, reserva);
+  const rA = await a.generar(TEXT_INPUT);
+  check("principal 503 → la reserva responde y sale bien", rA.ok, rA);
+  check("…con 2 llamadas: primero el principal, luego la reserva",
+    a.registro.llamadas === 2 && a.registro.modelos.join() === "modelo-de-prueba,modelo-de-reserva", a.registro);
+  check("…sin esperar los 2 s (otro modelo, otra carga)", a.registro.esperas.length === 0, a.registro);
+  check("…y la clave no viaja en la URL", !a.registro.claveEnLaUrl);
+
+  // UNAVAILABLE con otro estado HTTP también cuenta como 503.
+  const b = generadorFalso([{ status: 500, body: { error: { status: "UNAVAILABLE" } } }, exito], undefined, reserva);
+  const rB = await b.generar(TEXT_INPUT);
+  check("código UNAVAILABLE con HTTP 500 → pasa a la reserva", rB.ok && b.registro.modelos[1] === "modelo-de-reserva", b.registro);
+
+  // Principal con timeout (su propio límite) → reserva OK. firstAttemptMs de
+  // 40 ms para no esperar 25 s de verdad.
+  const c = generadorFalso(["cuelga", exito], undefined, { ...reserva, firstAttemptMs: 40 });
+  const rC = await c.generar(TEXT_INPUT);
+  check("principal sin responder en su límite → la reserva responde y sale bien", rC.ok, rC);
+  check("…con 2 llamadas (principal y reserva)",
+    c.registro.llamadas === 2 && c.registro.modelos.join() === "modelo-de-prueba,modelo-de-reserva", c.registro);
+
+  // Principal 503 y reserva 503 → «Gemini no respondió», 2 llamadas, no 3.
+  const d = generadorFalso([no503, no503, exito], undefined, reserva);
+  const rD = await d.generar(TEXT_INPUT);
+  check("principal 503 y reserva 503 → Gemini no respondió", !rD.ok && rD.failure === "noResponse", rD);
+  check("…con solo 2 llamadas (como mucho 2 intentos)", d.registro.llamadas === 2, d.registro);
+
+  // Principal con timeout y reserva 503 → igual, 2 llamadas.
+  const e = generadorFalso(["cuelga", no503, exito], undefined, { ...reserva, firstAttemptMs: 40 });
+  const rE = await e.generar(TEXT_INPUT);
+  check("principal sin responder y reserva 503 → Gemini no respondió (2 llamadas)",
+    !rE.ok && rE.failure === "noResponse" && e.registro.llamadas === 2, e.registro);
+
+  // La reserva responde con otro error: se informa como siempre.
+  const f = generadorFalso([no503, limite429], undefined, reserva);
+  const rF = await f.generar(TEXT_INPUT);
+  check("principal 503 y reserva 429 → límite de Google (2 llamadas)",
+    !rF.ok && rF.failure === "googleLimit" && f.registro.llamadas === 2, f.registro);
+
+  // Lo que NO pasa a la reserva: 429, 4xx, 500 sin UNAVAILABLE y fallo de red.
+  const g = generadorFalso([limite429, exito], undefined, reserva);
+  const rG = await g.generar(TEXT_INPUT);
+  check("429 → una sola llamada, sin reserva, y es el límite de Google",
+    !rG.ok && rG.failure === "googleLimit" && g.registro.llamadas === 1, g.registro);
+  const h = generadorFalso([{ status: 400, body: { error: { status: "INVALID_ARGUMENT" } } }, exito], undefined, reserva);
+  const rH = await h.generar(TEXT_INPUT);
+  check("400 → una sola llamada", !rH.ok && rH.failure === "unavailable" && h.registro.llamadas === 1, h.registro);
+  const i = generadorFalso([{ status: 500, body: { error: { status: "INTERNAL" } } }, exito], undefined, reserva);
+  const rI = await i.generar(TEXT_INPUT);
+  check("500 sin UNAVAILABLE → una sola llamada", !rI.ok && rI.failure === "noResponse" && i.registro.llamadas === 1, i.registro);
+  const j = generadorFalso(["red", exito], undefined, reserva);
+  const rJ = await j.generar(TEXT_INPUT);
+  check("fallo de red (no es un timeout) → una sola llamada",
+    !rJ.ok && rJ.failure === "noResponse" && j.registro.llamadas === 1, j.registro);
+
+  // El plazo único: el 503 llega a los 36 s → quedarían 9 s (< 10 s) → no hay
+  // reserva; a los 35 s quedan 10 s justos → sí.
+  const k = generadorFalso([no503, exito], 36_000, reserva);
+  const rK = await k.generar(TEXT_INPUT);
+  check("503 a los 36 s (quedarían 9 s) → no se pasa a la reserva",
+    !rK.ok && rK.failure === "noResponse" && k.registro.llamadas === 1, k.registro);
+  const l = generadorFalso([no503, exito], 35_000, reserva);
+  const rL = await l.generar(TEXT_INPUT);
+  check("503 a los 35 s (quedarían 10 s justos) → sí se pasa a la reserva", rL.ok && l.registro.llamadas === 2, l.registro);
+
+  // Sin reserva (o con una igual al principal, o en blanco) nada cambia: el
+  // reintento del mismo modelo tras 2 s.
+  const m = generadorFalso([no503, exito]);
+  const rM = await m.generar(TEXT_INPUT);
+  check("sin reserva → reintenta el mismo modelo tras 2 s",
+    rM.ok && m.registro.modelos.join() === "modelo-de-prueba,modelo-de-prueba" && m.registro.esperas.join() === "2000", m.registro);
+  const n = generadorFalso([no503, exito], undefined, { fallbackModel: "modelo-de-prueba" });
+  const rN = await n.generar(TEXT_INPUT);
+  check("reserva igual al principal → se trata como sin reserva (espera de 2 s)",
+    rN.ok && n.registro.esperas.join() === "2000", n.registro);
+  const o = generadorFalso([no503, exito], undefined, { fallbackModel: "   " });
+  const rO = await o.generar(TEXT_INPUT);
+  check("reserva en blanco → se trata como sin reserva", rO.ok && o.registro.esperas.join() === "2000", o.registro);
 }
 
 // ---------------------------------------------------------------------------
@@ -681,6 +791,7 @@ try {
   await probarLimite(user.id, other.id);
   const tercero = await prisma.user.create({ data: { email: EMAILS[2], name: "Temporal de los reintentos", emailVerified: true } });
   await probarReintento(tercero.id);
+  await probarReserva();
   await probarSelladas(user.id, other.id);
   await probarDificultad(user.id);
 

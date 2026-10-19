@@ -3,6 +3,7 @@ import { Plus, Skull } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { loadRedemption } from "@/lib/redemption";
+import { loadTrialStatus } from "@/lib/redemption-trial";
 import { AppShell } from "@/components/app/app-shell";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -80,11 +81,17 @@ export default async function MazmorraPage() {
   // jefes, EN PARALELO: en una carga normal, un solo viaje de espera. Si la
   // revisión marcó algún jefe, la lista ya leída puede tenerlo como vivo:
   // se vuelve a leer (pasa una vez por caída).
-  const [{ user, revised, activeMission, notices }, firstRead] = await Promise.all([
+  // La materia del jefe caído, su banco y la prueba abierta (para la tarjeta
+  // de la misión) van en el mismo viaje, en paralelo: una consulta que no
+  // devuelve nada si no hay misión.
+  const [{ user, revised, activeMission, notices }, firstRead, firstTrial] = await Promise.all([
     loadRedemption(sessionUser),
     aliveBosses(sessionUser.id),
+    loadTrialStatus(sessionUser.id),
   ]);
-  const tasks = revised ? await aliveBosses(user.id) : firstRead;
+  const [tasks, trial] = revised
+    ? await Promise.all([aliveBosses(user.id), loadTrialStatus(user.id)])
+    : [firstRead, firstTrial];
   const past = tasks.length === 0 ? await pastBosses(user.id) : null;
 
   return (
@@ -97,7 +104,7 @@ export default async function MazmorraPage() {
     >
       {/* La misión de redención va encima de los jefes (o del estado vacío). */}
       <div className="flex flex-col gap-4 md:gap-6">
-        {activeMission && <RedemptionCard mission={activeMission} />}
+        {activeMission && <RedemptionCard mission={activeMission} trial={trial} />}
         {past ? (
           <EmptyState
             icon={<Skull size={40} />}
