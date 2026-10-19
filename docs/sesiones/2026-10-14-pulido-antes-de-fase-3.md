@@ -703,7 +703,7 @@ tardío que lo mata cae vencido, sin `lateFall`.
   - la lista blanca de `?aviso=`;
   - los cuatro errores arreglados, medidos (ver cada sección).
 - **Envío real por Gmail** con `NODE_OPTIONS=--use-system-ca`, a la cuenta
-  local de prueba `lemeza364+prueba2@gmail.com`. El contador pasó de 1 a 2,
+  local de prueba `tu-correo@example.com`. El contador pasó de 1 a 2,
   no hubo errores en el log, la consola no lo imprimió y la respuesta tardó
   64 ms. **Falta que Luis confirme que llegó** a su bandeja, porque desde
   aquí no se puede abrir.

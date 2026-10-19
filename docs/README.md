@@ -16,8 +16,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   `origin/main` (la 14.ª, `repaso`, en `4ed523f`; la 15.ª, `brasa`, en
   `9d9ed5e`; la 16.ª, `fase3`, en `b2a302f`; la 17.ª en `80722aa`) y las
   aplica el build de Vercel al desplegar (no comprobado en el log en estas
-  sesiones). La 18.ª, `20261019210000_materia_unica`, solo en la base local
-  (sin commit).
+  sesiones). La 18.ª, `20261019210000_materia_unica`, también está en
+  `origin/main` (commit `22cc83f`).
   RLS activado en todas, y en producción también en `_prisma_migrations` (a
   mano).
 - **Desarrollo y producción separadas (10 oct, en `origin/main` desde el
@@ -30,8 +30,8 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   ("No pending migrations to apply."). Los `.env` de los equipos ya no
   tienen valores de producción. Detalles en
   [2026-10-10-bases-separadas.md](sesiones/2026-10-10-bases-separadas.md).
-- **Migraciones:** la última es `20261019210000_materia_unica` (19 oct, sin
-  commit; solo en la base local), escrita a mano: si un usuario tuviera dos
+- **Migraciones:** la última es `20261019210000_materia_unica` (19 oct,
+  commit `22cc83f`), escrita a mano: si un usuario tuviera dos
   materias con el mismo nombre (sin contar mayúsculas ni espacios de los
   extremos), se para con un mensaje claro sin tocar nada; si no, crea el
   índice único de expresión `"Subject_userId_name_ci_key"` sobre
@@ -97,7 +97,19 @@ estudio les quitan vida y el personaje del usuario tiene nivel, almas
   de Luis. `GMAIL_USER` y `GMAIL_APP_PASSWORD` ya están en Vercel
   (*Production*). Detalles en
   [2026-10-10-verificacion-de-correo.md](sesiones/2026-10-10-verificacion-de-correo.md).
-- **Pulido 2 (19 oct, sin commit):**
+- **Repositorio listo para hacerse público (19 oct, sin commit):** auditado
+  todo el historial de `origin/main` (30 commits, cada archivo y cada diff):
+  **ningún secreto**, así que no se rota nada y el historial se queda como
+  está. Arreglados el correo real y la ruta personal de dos sesiones viejas,
+  `.claude/settings.local.json` en el `.gitignore` del proyecto y fuera los
+  cinco SVG de la plantilla. `README.md` nuevo en inglés (demo, funciones,
+  stack y por qué, arquitectura en Mermaid, *engineering highlights*,
+  arranque, pruebas y cómo se construyó, con ayuda de IA) con seis capturas
+  en `docs/img/`, que regenera `scripts/capturas-readme.mjs`. Licencia:
+  «Source available for review. All rights reserved.», sin archivo
+  `LICENSE`. Detalles en
+  [2026-10-19-repositorio-publico.md](sesiones/2026-10-19-repositorio-publico.md).
+- **Pulido 2 (19 oct, commit `22cc83f`):**
   - **Materias con nombre único por usuario**, sin contar mayúsculas ni
     espacios de los extremos (las tildes sí cuentan: «Calculo» ≠ «Cálculo»).
     Lo impone un índice de expresión en la base; crear y el nuevo
@@ -470,7 +482,11 @@ No están en `package.json`: son programas del equipo, fuera del repositorio.
     `node scripts/auditar-navegadores.mjs`: las 8 pantallas a 1280 y 320 px
     en los tres motores (scroll horizontal, errores, nombres accesibles, un
     `h1`, orden de encabezados, Tab y foco visible). Informe en
-    `capturas/auditoria/informe.json`.
+    `capturas/auditoria/informe.json`;
+  - `node scripts/capturas-readme.mjs` (después de `--preparar`, que deja el
+    contraataque a medias): las capturas del `README.md`, en PNG en
+    `capturas/readme/` y, con `--publicar`, en WebP en `docs/img/` (necesita
+    ffmpeg).
 - **WebKit en Windows se parece a Safari, pero no es Safari.** Comparte el
   motor, no la integración con el sistema (fuentes, códecs, modo de bajo
   consumo, iOS). Por ejemplo, ahí Inter y Cinzel salen sin negrita y Tab no
@@ -1020,6 +1036,24 @@ La auditoría automática comprueba nombres, encabezados y foco, pero no cómo
   y valores de desarrollo.
 - **Después de cambiar una variable en Vercel, hacer Redeploy.** El despliegue
   publicado no ve el cambio.
+- **El entorno *Preview* de Vercel no tiene ninguna variable, a propósito.**
+  Con el repositorio público, un pull request desde un fork puede generar una
+  vista previa: sin variables, su código no tiene ningún secreto que leer.
+  Los despliegues desde forks piden autorización. Toda variable nueva va solo
+  en *Production*.
+- **Nada personal en archivos versionados:** en `docs/` y en el código, los
+  correos de ejemplo son `@ember.test` o `@example.com`, y las rutas, relativas
+  al repositorio. `.claude/settings.local.json` (permisos y una IP de la red
+  local) está en el `.gitignore` del proyecto, no solo en el global.
+- **El `README.md` de la raíz va en inglés y solo dice lo que el código
+  hace;** `docs/` sigue en español. Si cambia algo que el README cuenta
+  (límites del escriba, reglas del juego, variables, scripts), se revisa.
+  Sus capturas viven en `docs/img/` (WebP, menos de 300 KB cada una) y se
+  hacen con `scripts/capturas-readme.mjs` (la cuenta del seed; mejor con
+  `next build` + `next start`: en `next dev` con `EMBER_TEST_VIGIL_SECONDS`
+  la batalla enseña la vigilia corta). El README dice cómo se construyó:
+  diseño y revisión de Luis, implementación con ayuda de IA (Claude Code), y
+  describe el trabajo sin primera persona salvo en esa sección.
 - **No quitar `"postinstall": "prisma generate"`.** Vercel guarda en caché las
   dependencias y el cliente de Prisma se quedaría viejo.
 - **Next.js 16 tiene cambios grandes** respecto a versiones anteriores: antes
@@ -1091,6 +1125,25 @@ La auditoría automática comprueba nombres, encabezados y foco, pero no cómo
 
 ## Pendientes
 
+- [x] ~~Licencia y crédito del video en el `README.md`~~ (19 oct): «Source
+  available for review. All rights reserved.» (sin archivo `LICENSE`) y
+  «original animation, with the current interface composited by
+  scripts/video-hero.mjs».
+- [ ] Si Luis concreta el origen de la animación original del hero, completar
+  *Credits* en el `README.md`.
+- [ ] **Vercel (Luis):** quitar `BETTER_AUTH_SECRET` de *Preview* (que quede
+  sin ninguna variable) y confirmar que los despliegues desde forks piden
+  autorización.
+- [ ] **Correo noreply de GitHub en los commits nuevos (Luis),** en los dos
+  equipos: explicado en
+  [2026-10-19-repositorio-publico.md](sesiones/2026-10-19-repositorio-publico.md#el-correo-de-los-commits-y-el-correo-noreply-de-github).
+- [ ] **Después de hacerlo público, en GitHub:** activar *secret scanning*,
+  *push protection* y *Dependabot alerts*; poner la descripción, los
+  *topics* y el enlace a la web del repositorio.
+- [ ] Después del push, abrir el `README.md` en GitHub y comprobar el
+  diagrama Mermaid y las capturas.
+- [x] ~~El script de las capturas del README, al repositorio~~ (19 oct):
+  `scripts/capturas-readme.mjs`.
 - [ ] **Después del push del pulido 2:** mirar en el log del build de Vercel
   que se aplica `20261019210000_materia_unica` (si hubiera materias
   repetidas, el build fallaría con el mensaje y la consulta para
@@ -1124,8 +1177,9 @@ La auditoría automática comprueba nombres, encabezados y foco, pero no cómo
   aproximación de Safari, ya con la auditoría automática del pulido 2: sin
   problemas en perfil y compañeros.)
 
-- [ ] **Elegir y probar un modelo de reserva real** (`GEMINI_MODEL_FALLBACK`):
-  solo se probó con el `fetch` falso.
+- [ ] **Probar el modelo de reserva con 503 reales** (`GEMINI_MODEL_FALLBACK`):
+  según Luis, ya está configurado en producción (19 oct), pero el cambio de
+  modelo solo se ha probado con el `fetch` falso.
 - [ ] **Repetir la llamada real a Gemini del refuerzo:**
   `node --env-file=.env --import ./scripts/alias-hooks.mjs scripts/probar-gemini.ts refuerzo`
   (y `texto`). El 18 oct Gemini respondía 503 o no respondía, también al
@@ -1162,7 +1216,7 @@ La auditoría automática comprueba nombres, encabezados y foco, pero no cómo
   (en AppShell, el resto del día), hace falta una columna (por ejemplo
   `User.emberSavedDay`). Hoy solo sale justo después del golpe.
 - [ ] Confirmar que llegó a Gmail el correo «Crea una contraseña nueva para
-  Ember» enviado en local a `lemeza364+prueba2@gmail.com` (14 oct).
+  Ember» enviado en local a `tu-correo@example.com` (14 oct).
 - [x] ~~**Nombre heredado del secuestro previo**~~ (19 oct): el nombre se
   cambia en `/perfil`.
 - [ ] Probar «olvidé mi contraseña» y el ojo con lector de pantalla, en
@@ -1323,7 +1377,8 @@ La auditoría automática comprueba nombres, encabezados y foco, pero no cómo
 - [x] ~~Quitar *Preview* de `DATABASE_URL` y `DIRECT_URL` en Vercel~~
   (10 oct, Luis desde el panel): las dos están ya solo en *Production*. Las
   vistas previas no tienen base hasta que tengan una propia.
-  `BETTER_AUTH_SECRET` sigue en *Production* y *Preview*.
+  `BETTER_AUTH_SECRET` sigue en *Production* y *Preview* (19 oct: Luis la
+  quita de *Preview*; ver el pendiente de Vercel arriba).
 - [x] ~~Separar la base de desarrollo (Docker) de la de producción y migrar
   producción desde el build de Vercel~~ (10 oct, commit `b805759`).
 - [x] ~~Comprobar a qué entornos de Vercel están asignadas las variables~~
@@ -1397,3 +1452,4 @@ La auditoría automática comprueba nombres, encabezados y foco, pero no cómo
 | 2026-10-19 | Fase 4: perfil (nombre, contraseña, hazañas, borrar la cuenta en cascada con reintento ante `40P01`), Google (OAuth con PKCE, vinculación solo con correos verificados, sin tokens, `disabledPaths`), recompensas (6 bendiciones con oferta fijada en el servidor y pesos exactos, 9 reliquias y títulos, gasto en la transacción que las usa) y compañeros (código con `node:crypto` y relleno SQL sin bits fijos, lápida, límite diario, clasificación semanal de Bogotá, privacidad) | [2026-10-19-fase-4-perfil-google-recompensas-companeros.md](sesiones/2026-10-19-fase-4-perfil-google-recompensas-companeros.md) |
 | 2026-10-17 | Landing de la Fase 2: textos auditados ("Estudia. Golpea. Conquista."), cabecera fija, jefes y brasas en el hero, islas `Reveal` (IntersectionObserver) y `VigilClock`, bestiario, sección El escriba, máscaras de degradado, rejilla de dos columnas, "Pausar animaciones" (`@custom-variant`, `localStorage`), `scripts/capturas-landing.mjs` (CDP) | [2026-10-17-landing-fase-2.md](sesiones/2026-10-17-landing-fase-2.md) |
 | 2026-10-19 | Pulido 2: índice redundante fuera (`EXPLAIN`, prefijo izquierdo), materia única por usuario con índice de expresión `lower(btrim(name))` escrito a mano y comprobado con `migrate diff`, renombrar, video del hero con «Asestar golpe» (CDP + ffmpeg sobre el original de git), script en línea contra el parpadeo (FOUC) y video sin `autoPlay`, auditoría en Chrome/Firefox/WebKit con `ariaSnapshot` y Tab (Playwright fuera del repositorio) | [2026-10-19-pulido-2.md](sesiones/2026-10-19-pulido-2.md) |
+| 2026-10-19 | Repositorio público: auditoría de todo el historial (archivos, diffs, autores, datos personales, seguridad del código, RLS) sin ningún secreto, rotar frente a reescribir, correo noreply, `.gitignore`, `README.md` en inglés para reclutadores con capturas en `docs/img/` | [2026-10-19-repositorio-publico.md](sesiones/2026-10-19-repositorio-publico.md) |

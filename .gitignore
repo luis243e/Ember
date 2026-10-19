@@ -46,3 +46,6 @@ next-env.d.ts
 
 # Capturas de pruebas visuales (locales, no van al repo)
 /capturas/
+
+# Ajustes locales de Claude Code (permisos, IPs de la red local)
+.claude/settings.local.json

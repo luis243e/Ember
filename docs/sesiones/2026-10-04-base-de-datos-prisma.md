@@ -17,7 +17,7 @@ origen: "Obsidian, vault programacion, carpeta Ember, nota «Fase 0.md»"
 
 En esta fase se creó el proyecto, se diseñaron las tablas ("cajones") y se crearon de verdad en Supabase. Esta nota explica **qué es cada cosa y por qué está ahí**. Para la teoría general (tablas, SQL, ORM, migraciones) mira la nota «02-Bases de datos explicadas» del vault de Obsidian (no está importada en el repositorio).
 
-**Proyecto:** `C:\Users\lemez\Desktop\proyectos\Ember\ember`
+**Proyecto:** la raíz del repositorio (`Ember/`)
 
 ---
 
